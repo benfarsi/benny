@@ -1,0 +1,17 @@
+# data — CSVs are too large for git, regenerate with collector.py
+data/*.csv
+data/model.pkl
+data/model_meta.json
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# ide
+.vscode/
+.idea/
+
+# claude
+.claude/

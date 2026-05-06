@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Benny</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:      #0a0a0a;
+      --s1:      #111111;
+      --s2:      #181818;
+      --b1:      #222222;
+      --b2:      #2e2e2e;
+      --t1:      #f0f0f0;
+      --t2:      #888888;
+      --t3:      #444444;
+      --green:   #22c55e;
+      --red:     #ef4444;
+      --orange:  #f59e0b;
+      --blue:    #3b82f6;
+      --mono:    'JetBrains Mono', monospace;
+    }
+
+    body {
+      background: var(--bg);
+      font-family: 'Inter', sans-serif;
+      color: var(--t1);
+      min-height: 100vh;
+    }
+
+    /* ── nav ─────────────────────────────────────────────────────── */
+    nav {
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(10,10,10,0.92);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--b1);
+      padding: 0 40px;
+      display: flex; align-items: center; height: 58px; gap: 24px;
+    }
+    .logo {
+      font-size: 20px; font-weight: 900; letter-spacing: -0.5px;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .logo-dot { color: var(--green); }
+    .pulse {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--green); flex-shrink: 0;
+      animation: blink 2.4s ease-in-out infinite;
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.2} }
+
+    .nav-links { display: flex; gap: 2px; }
+    .nav-btn {
+      padding: 5px 14px; font-size: 13px; font-weight: 600;
+      color: var(--t2); cursor: pointer; border-radius: 5px;
+      transition: all .12s; user-select: none;
+    }
+    .nav-btn:hover  { color: var(--t1); background: var(--s2); }
+    .nav-btn.active { color: var(--t1); background: var(--s2); }
+
+    #nav-ts {
+      margin-left: auto; font-size: 12px;
+      color: var(--t3); font-family: var(--mono);
+    }
+
+    /* ── pages ───────────────────────────────────────────────────── */
+    .page { display: none; padding: 32px 40px 60px; }
+    .page.active { display: block; }
+
+    /* ── section header ──────────────────────────────────────────── */
+    .sh {
+      display: flex; align-items: center; gap: 12px; margin-bottom: 14px;
+    }
+    .sh-label {
+      font-size: 11px; font-weight: 700; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--t3); white-space: nowrap;
+    }
+    .sh-line { flex: 1; height: 1px; background: var(--b1); }
+
+    /* ── symbol strip ────────────────────────────────────────────── */
+    .strip-wrap { margin-bottom: 26px; }
+    .strip {
+      display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px;
+      scrollbar-width: none;
+    }
+    .strip::-webkit-scrollbar { display: none; }
+    .chip {
+      flex-shrink: 0; padding: 5px 13px; background: var(--s1);
+      border: 1px solid var(--b1); border-radius: 100px;
+      font-size: 12px; font-weight: 600; cursor: pointer; user-select: none;
+      transition: all .12s; display: flex; align-items: center; gap: 6px;
+      white-space: nowrap;
+    }
+    .chip:hover { border-color: var(--b2); background: var(--s2); }
+    .chip.active { background: var(--t1); color: var(--bg); border-color: var(--t1); }
+    .chip .cpnl { font-size: 10px; font-family: var(--mono); font-weight: 700; }
+    .chip:not(.active) .cpnl.up   { color: var(--green); }
+    .chip:not(.active) .cpnl.down { color: var(--red); }
+    .chip.err { border-color: var(--red); }
+
+    /* ── stat cards ──────────────────────────────────────────────── */
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+      gap: 10px; margin-bottom: 26px;
+    }
+    .card {
+      background: var(--s1); border: 1px solid var(--b1); border-radius: 8px;
+      padding: 16px 18px; transition: border-color .12s;
+    }
+    .card:hover { border-color: var(--b2); }
+    .c-label {
+      font-size: 10px; font-weight: 700; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--t3); margin-bottom: 8px;
+    }
+    .c-val {
+      font-size: 26px; font-weight: 900; line-height: 1;
+      font-family: var(--mono);
+    }
+    .c-val.buy  { color: var(--green); }
+    .c-val.sell { color: var(--red); }
+    .c-val.hold { color: var(--orange); }
+    .c-val.up   { color: var(--green); }
+    .c-val.dn   { color: var(--red); }
+
+    /* ── chart ───────────────────────────────────────────────────── */
+    #chart-wrap {
+      border: 1px solid var(--b1); border-radius: 8px;
+      overflow: hidden; margin-bottom: 26px; min-height: 504px;
+    }
+
+    /* ── table ───────────────────────────────────────────────────── */
+    .tbl-wrap {
+      background: var(--s1); border: 1px solid var(--b1); border-radius: 8px;
+      overflow: hidden;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    thead th {
+      text-align: left; font-size: 10px; font-weight: 700;
+      letter-spacing: .1em; text-transform: uppercase; color: var(--t3);
+      padding: 13px 20px; border-bottom: 1px solid var(--b1);
+    }
+    tbody td {
+      padding: 13px 20px; font-size: 14px; font-weight: 600;
+      font-family: var(--mono); border-bottom: 1px solid var(--b1);
+    }
+    tbody tr:last-child td { border-bottom: none; }
+    tbody tr:hover td { background: var(--s2); }
+    .tr-buy  { color: var(--green); }
+    .tr-sell { color: var(--red); }
+    .tr-empty { color: var(--t3); font-family: 'Inter',sans-serif; font-weight: 400; }
+
+    /* ── error banner ────────────────────────────────────────────── */
+    .err-bar {
+      display: none; background: rgba(239,68,68,.08);
+      border: 1px solid rgba(239,68,68,.25); border-radius: 6px;
+      padding: 9px 15px; font-size: 12px; color: var(--red); margin-bottom: 16px;
+    }
+
+    /* ════════════════════════════════ MODEL PAGE ═══════════════════ */
+
+    .model-top {
+      display: flex; align-items: flex-start;
+      justify-content: space-between; margin-bottom: 24px;
+    }
+    .model-title { font-size: 24px; font-weight: 900; }
+    .model-sub { font-size: 12px; color: var(--t3); margin-top: 4px; font-family: var(--mono); }
+
+    .btn-row { display: flex; gap: 8px; align-items: center; }
+    .btn {
+      padding: 8px 20px; font-size: 13px; font-weight: 700; border: none;
+      border-radius: 6px; cursor: pointer; font-family: 'Inter',sans-serif;
+      transition: all .12s;
+    }
+    .btn-ghost {
+      background: var(--s2); color: var(--t2); border: 1px solid var(--b1);
+    }
+    .btn-ghost:hover { color: var(--t1); border-color: var(--b2); }
+    .btn-solid { background: var(--t1); color: var(--bg); }
+    .btn-solid:hover { background: #d0d0d0; }
+    .btn:disabled { opacity: .35; cursor: not-allowed; pointer-events: none; }
+
+    /* info cards row */
+    .meta-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 10px; margin-bottom: 24px;
+    }
+    .mc {
+      background: var(--s1); border: 1px solid var(--b1); border-radius: 8px;
+      padding: 14px 16px;
+    }
+    .mc-label {
+      font-size: 10px; font-weight: 700; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--t3); margin-bottom: 6px;
+    }
+    .mc-val { font-size: 20px; font-weight: 900; font-family: var(--mono); }
+
+    /* two-col layout */
+    .model-cols {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+      margin-bottom: 24px;
+    }
+    @media (max-width: 860px) { .model-cols { grid-template-columns: 1fr; } }
+
+    /* fold table */
+    .ftbl { width: 100%; border-collapse: collapse; }
+    .ftbl th {
+      font-size: 10px; font-weight: 700; letter-spacing: .08em;
+      text-transform: uppercase; color: var(--t3);
+      padding: 11px 14px; border-bottom: 1px solid var(--b1);
+      text-align: right; white-space: nowrap;
+    }
+    .ftbl th:first-child { text-align: left; }
+    .ftbl td {
+      padding: 10px 14px; font-size: 12px; font-family: var(--mono);
+      font-weight: 600; text-align: right; border-bottom: 1px solid var(--b1);
+      color: var(--t2);
+    }
+    .ftbl td:first-child { text-align: left; color: var(--t1); }
+    .ftbl tbody tr:last-child td { border-bottom: none; }
+    .ftbl .avg-row td {
+      color: var(--t1); border-top: 1px solid var(--b2); background: var(--s2);
+    }
+    .ftbl tbody tr:hover td { background: var(--s2); }
+    .ftbl .avg-row:hover td { background: var(--s2); }
+
+    /* log */
+    .log-box {
+      background: #070707; border: 1px solid var(--b1); border-radius: 8px;
+      overflow: hidden;
+    }
+    .log-head {
+      display: flex; align-items: center; gap: 8px; padding: 10px 14px;
+      border-bottom: 1px solid var(--b1);
+    }
+    .log-head-label {
+      font-size: 11px; font-weight: 700; letter-spacing: .08em;
+      text-transform: uppercase; color: var(--t3);
+    }
+    .badge {
+      font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 3px;
+      font-family: var(--mono); text-transform: lowercase;
+    }
+    .badge-idle     { background: rgba(136,136,136,.15); color: #666; }
+    .badge-training { background: rgba(59,130,246,.18);  color: var(--blue); }
+    .badge-done     { background: rgba(34,197,94,.18);   color: var(--green); }
+    .badge-error    { background: rgba(239,68,68,.18);   color: var(--red); }
+
+    .log-ts { margin-left: auto; font-size: 11px; font-family: var(--mono); color: var(--t3); }
+    .log-body {
+      height: 300px; overflow-y: auto; padding: 10px 14px;
+      font-family: var(--mono); font-size: 11.5px; line-height: 1.75;
+      color: #4a4a4a;
+      scrollbar-width: thin; scrollbar-color: #2a2a2a transparent;
+    }
+    .log-body::-webkit-scrollbar { width: 4px; }
+    .log-body::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 2px; }
+    .log-new   { color: var(--t2) !important; }
+    .log-empty { color: var(--t3); font-style: italic; }
+
+    /* feature importance */
+    .feat-box {
+      background: var(--s1); border: 1px solid var(--b1); border-radius: 8px;
+      padding: 18px 20px;
+    }
+    .feat-row { display: flex; align-items: center; gap: 10px; margin-bottom: 9px; }
+    .feat-row:last-child { margin-bottom: 0; }
+    .feat-name {
+      width: 145px; flex-shrink: 0; font-size: 11px; font-family: var(--mono);
+      color: var(--t2); text-align: right; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap;
+    }
+    .feat-track {
+      flex: 1; height: 5px; background: var(--s2); border-radius: 3px;
+      overflow: hidden;
+    }
+    .feat-fill {
+      height: 100%; background: var(--blue); border-radius: 3px;
+      transition: width .5s ease;
+    }
+    .feat-score { width: 48px; font-size: 11px; font-family: var(--mono); color: var(--t3); text-align: right; }
+
+    /* placeholder */
+    .ph {
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; padding: 40px; gap: 6px; text-align: center;
+    }
+    .ph-t { font-size: 14px; font-weight: 600; color: var(--t2); }
+    .ph-s { font-size: 12px; color: var(--t3); }
+
+    /* ════════════════════════════ PORTFOLIO PAGE ═══════════════════ */
+    .pf-summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 10px; margin-bottom: 26px;
+    }
+    .pf-card {
+      background: var(--s1); border: 1px solid var(--b1); border-radius: 8px;
+      padding: 20px 22px;
+    }
+    .pf-label {
+      font-size: 10px; font-weight: 700; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--t3); margin-bottom: 8px;
+    }
+    .pf-val {
+      font-size: 32px; font-weight: 900; font-family: var(--mono); line-height: 1;
+    }
+    .pf-val.up { color: var(--green); }
+    .pf-val.dn { color: var(--red); }
+    .eq-wrap {
+      background: var(--s1); border: 1px solid var(--b1); border-radius: 8px;
+      padding: 18px 20px; margin-bottom: 26px;
+    }
+    .eq-canvas-wrap { position: relative; height: 180px; }
+    #eq-canvas { display: block; width: 100%; height: 100%; }
+    .eq-empty {
+      height: 180px; display: flex; align-items: center; justify-content: center;
+      color: var(--t3); font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+
+<nav>
+  <div class="logo">ben<span class="logo-dot">.</span><span class="pulse"></span></div>
+  <div class="nav-links">
+    <div class="nav-btn active" onclick="showPage('trading',this)">Trading</div>
+    <div class="nav-btn"       onclick="showPage('model',this)">Model</div>
+    <div class="nav-btn"       onclick="showPage('portfolio',this)">Portfolio</div>
+  </div>
+  <span id="nav-ts">—</span>
+</nav>
+
+<!-- ══════════════════════════ TRADING PAGE ═══════════════════════ -->
+<div class="page active" id="page-trading">
+
+  <div class="strip-wrap">
+    <div class="strip" id="sym-strip"></div>
+  </div>
+
+  <div class="err-bar" id="err-bar"></div>
+
+  <div class="sh"><span class="sh-label">Overview</span><div class="sh-line"></div></div>
+  <div class="cards">
+    <div class="card"><div class="c-label">Price</div>     <div class="c-val" id="c-price">—</div></div>
+    <div class="card"><div class="c-label">Signal</div>    <div class="c-val" id="c-signal">—</div></div>
+    <div class="card"><div class="c-label">RSI (14)</div>  <div class="c-val" id="c-rsi">—</div></div>
+    <div class="card"><div class="c-label">EMA (20)</div>  <div class="c-val" id="c-ema">—</div></div>
+    <div class="card"><div class="c-label">Portfolio</div> <div class="c-val" id="c-portfolio">—</div></div>
+    <div class="card"><div class="c-label">P&amp;L</div>   <div class="c-val" id="c-pnl">—</div></div>
+    <div class="card"><div class="c-label">Cash</div>      <div class="c-val" id="c-usdt">—</div></div>
+    <div class="card"><div class="c-label" id="l-asset">Asset</div><div class="c-val" id="c-asset">—</div></div>
+  </div>
+
+  <div class="sh"><span class="sh-label">Chart</span><div class="sh-line"></div></div>
+  <div id="chart-wrap"><div id="tv_chart"></div></div>
+
+  <div class="sh" style="margin-top:26px;"><span class="sh-label">Recent Trades</span><div class="sh-line"></div></div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>Type</th><th>Price</th><th>Time (UTC)</th></tr></thead>
+      <tbody id="trades-body">
+        <tr><td colspan="3" class="tr-empty">No trades yet.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ═══════════════════════════ MODEL PAGE ════════════════════════ -->
+<div class="page" id="page-model">
+
+  <div class="model-top">
+    <div>
+      <div class="model-title">XGBoost Classifier</div>
+      <div class="model-sub" id="m-subtitle">No model loaded</div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-ghost" id="btn-fast" onclick="startTrain(true)">Fast train</button>
+      <button class="btn btn-solid" id="btn-full" onclick="startTrain(false)">Train full</button>
+    </div>
+  </div>
+
+  <div class="meta-cards">
+    <div class="mc"><div class="mc-label">Status</div>   <div class="mc-val" id="m-status">—</div></div>
+    <div class="mc"><div class="mc-label">Features</div> <div class="mc-val" id="m-feats">—</div></div>
+    <div class="mc"><div class="mc-label">Samples</div>  <div class="mc-val" id="m-samples">—</div></div>
+    <div class="mc"><div class="mc-label">Avg AUC</div>  <div class="mc-val" id="m-auc">—</div></div>
+    <div class="mc"><div class="mc-label">Avg Sharpe</div><div class="mc-val" id="m-sharpe">—</div></div>
+    <div class="mc"><div class="mc-label">Avg Return</div><div class="mc-val" id="m-ret">—</div></div>
+  </div>
+
+  <div class="model-cols">
+    <!-- fold results -->
+    <div>
+      <div class="sh"><span class="sh-label">Walk-Forward Validation</span><div class="sh-line"></div></div>
+      <div class="tbl-wrap">
+        <table class="ftbl">
+          <thead>
+            <tr><th>Fold</th><th>AUC</th><th>Sharpe</th><th>Return</th><th>Trades</th><th>Win%</th></tr>
+          </thead>
+          <tbody id="fold-body">
+            <tr><td colspan="6" class="ph-s" style="text-align:center;padding:28px;color:var(--t3);font-family:'Inter',sans-serif;">No training data yet.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- log -->
+    <div>
+      <div class="sh"><span class="sh-label">Training Log</span><div class="sh-line"></div></div>
+      <div class="log-box">
+        <div class="log-head">
+          <span class="log-head-label">stdout</span>
+          <span class="badge badge-idle" id="log-badge">idle</span>
+          <span class="log-ts" id="log-ts"></span>
+        </div>
+        <div class="log-body" id="log-body">
+          <span class="log-empty">No training run yet.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sh"><span class="sh-label">Feature Importance (Top 20)</span><div class="sh-line"></div></div>
+  <div class="feat-box" id="feat-box">
+    <div class="ph">
+      <div class="ph-t">No model loaded</div>
+      <div class="ph-s">Run training to see feature importance.</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════════ PORTFOLIO PAGE ════════════════════════ -->
+<div class="page" id="page-portfolio">
+
+  <div class="pf-summary">
+    <div class="pf-card">
+      <div class="pf-label">Total Value</div>
+      <div class="pf-val" id="pf-total">—</div>
+    </div>
+    <div class="pf-card">
+      <div class="pf-label">Total P&amp;L</div>
+      <div class="pf-val" id="pf-pnl">—</div>
+    </div>
+    <div class="pf-card">
+      <div class="pf-label">Capital Invested</div>
+      <div class="pf-val" id="pf-invested">—</div>
+    </div>
+    <div class="pf-card">
+      <div class="pf-label">Symbols</div>
+      <div class="pf-val" id="pf-syms">—</div>
+    </div>
+  </div>
+
+  <div class="sh"><span class="sh-label">Equity Curve</span><div class="sh-line"></div></div>
+  <div class="eq-wrap">
+    <div class="eq-canvas-wrap" id="eq-canvas-wrap">
+      <div class="eq-empty" id="eq-empty">Waiting for first full cycle…</div>
+      <canvas id="eq-canvas" style="display:none;"></canvas>
+    </div>
+  </div>
+
+  <div class="sh"><span class="sh-label">Performance by Symbol</span><div class="sh-line"></div></div>
+  <div class="tbl-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Symbol</th><th>Price</th><th>Portfolio</th>
+          <th>P&amp;L</th><th>Trades</th><th>Signal</th>
+        </tr>
+      </thead>
+      <tbody id="pf-body">
+        <tr><td colspan="6" class="tr-empty">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+<script src="https://s3.tradingview.com/tv.js"></script>
+<script>
+const TV_MAP = {
+  'BTC/USDT':'BINANCE:BTCUSDT',   'ETH/USDT':'BINANCE:ETHUSDT',
+  'BNB/USDT':'BINANCE:BNBUSDT',   'XRP/USDT':'BINANCE:XRPUSDT',
+  'SOL/USDT':'BINANCE:SOLUSDT',   'DOGE/USDT':'BINANCE:DOGEUSDT',
+  'ADA/USDT':'BINANCE:ADAUSDT',   'AVAX/USDT':'BINANCE:AVAXUSDT',
+  'LINK/USDT':'BINANCE:LINKUSDT', 'DOT/USDT':'BINANCE:DOTUSDT',
+  'TON/USDT':'BINANCE:TONUSDT',   'SUI/USDT':'BINANCE:SUIUSDT',
+  'APT/USDT':'BINANCE:APTUSDT',   'INJ/USDT':'BINANCE:INJUSDT',
+  'ARB/USDT':'BINANCE:ARBUSDT',   'PEPE/USDT':'BINANCE:PEPEUSDT',
+  'SHIB/USDT':'BINANCE:SHIBUSDT', 'WIF/USDT':'BINANCE:WIFUSDT',
+  'AAPL':'NASDAQ:AAPL',  'MSFT':'NASDAQ:MSFT',
+  'GOOGL':'NASDAQ:GOOGL','AMZN':'NASDAQ:AMZN',
+  'META':'NASDAQ:META',  'NVDA':'NASDAQ:NVDA',
+  'AMD':'NASDAQ:AMD',    'TSLA':'NASDAQ:TSLA',
+  'PLTR':'NASDAQ:PLTR',  'INTC':'NASDAQ:INTC',
+  'MSTR':'NASDAQ:MSTR',  'COIN':'NASDAQ:COIN',
+  'NFLX':'NASDAQ:NFLX',  'UBER':'NYSE:UBER',
+  'XOM':'NYSE:XOM',      'CVX':'NYSE:CVX',
+  'COP':'NYSE:COP',      'OXY':'NYSE:OXY',
+  'JPM':'NYSE:JPM',      'BAC':'NYSE:BAC',
+  'V':'NYSE:V',          'MA':'NYSE:MA',
+  'GS':'NYSE:GS',        'SPY':'AMEX:SPY',
+  'QQQ':'NASDAQ:QQQ',
+};
+
+const $   = id => document.getElementById(id);
+const fmt = (n,d=2) => n==null?'—':Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
+const fmtP = n => n==null?'—':(n>=0?'+':'')+fmt(n)+'%';
+const base = s => s.includes('/')?s.split('/')[0]:s;
+const esc  = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+let selected = null, chartSym = null, allData = {}, curPage = 'trading';
+
+// ── pages ──────────────────────────────────────────────────────
+function showPage(name, el) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  $('page-'+name).classList.add('active');
+  el.classList.add('active');
+  curPage = name;
+  if (name === 'model')     refreshModel();
+  if (name === 'portfolio') refreshPortfolio();
+}
+
+// ── strip ──────────────────────────────────────────────────────
+function renderStrip() {
+  const wrap = $('sym-strip');
+  wrap.innerHTML = '';
+  Object.keys(allData).forEach(sym => {
+    const d = allData[sym];
+    const chip = document.createElement('div');
+    chip.className = 'chip'+(sym===selected?' active':'')+(d.status==='error'?' err':'');
+    const pnl = d.pnl_pct!=null
+      ? `<span class="cpnl ${sym!==selected?(d.pnl_pct>=0?'up':'down'):''}">${fmtP(d.pnl_pct)}</span>`
+      : '';
+    chip.innerHTML = `<span>${sym}</span>${pnl}`;
+    chip.onclick = () => select(sym);
+    wrap.appendChild(chip);
+  });
+}
+
+// ── cards ──────────────────────────────────────────────────────
+function renderCards(sym, d) {
+  $('nav-ts').textContent   = d.timestamp ?? '—';
+  $('c-price').textContent  = d.price!=null ? '$'+fmt(d.price) : '—';
+  $('c-ema').textContent    = d.ema!=null   ? '$'+fmt(d.ema)   : '—';
+  $('c-rsi').textContent    = fmt(d.rsi,1);
+  $('c-usdt').textContent   = d.usdt!=null  ? '$'+fmt(d.usdt)  : '—';
+  $('c-portfolio').textContent = d.portfolio!=null ? '$'+fmt(d.portfolio) : '—';
+  $('l-asset').textContent  = base(sym);
+  $('c-asset').textContent  = d.asset!=null ? Number(d.asset).toFixed(sym.includes('/')?6:4) : '—';
+
+  const sig = $('c-signal');
+  sig.textContent = d.signal ?? '—';
+  sig.className   = 'c-val '+(d.signal==='BUY'?'buy':d.signal==='SELL'?'sell':'hold');
+
+  const pnl = $('c-pnl');
+  pnl.textContent = fmtP(d.pnl_pct);
+  pnl.className   = 'c-val '+((d.pnl_pct??0)>=0?'up':'dn');
+
+  const eb = $('err-bar');
+  if (d.error) { eb.style.display='block'; eb.textContent='Error: '+d.error; }
+  else { eb.style.display='none'; }
+}
+
+// ── chart ──────────────────────────────────────────────────────
+function renderChart(sym) {
+  if (sym===chartSym) return;
+  chartSym = sym;
+  $('tv_chart').innerHTML = '';
+  new TradingView.widget({
+    container_id:'tv_chart', symbol: TV_MAP[sym]??sym,
+    interval:'1', timezone:'Etc/UTC', theme:'dark', style:'1',
+    locale:'en', width:'100%', height:500,
+    save_image:false, enable_publishing:false,
+    toolbar_bg:'#111111', backgroundColor:'rgba(17,17,17,1)',
+  });
+}
+
+// ── trades ─────────────────────────────────────────────────────
+function renderTrades(d) {
+  const tb = $('trades-body');
+  if (d.recent_trades?.length) {
+    tb.innerHTML = d.recent_trades.map(t=>`
+      <tr>
+        <td class="tr-${t.type.toLowerCase()}">${t.type}</td>
+        <td>$${fmt(t.price)}</td>
+        <td>${t.time} UTC</td>
+      </tr>`).join('');
+  } else {
+    tb.innerHTML = '<tr><td colspan="3" class="tr-empty">No trades yet.</td></tr>';
+  }
+}
+
+// ── select ─────────────────────────────────────────────────────
+function select(sym) {
+  selected = sym;
+  renderStrip();
+  if (allData[sym]) { renderCards(sym,allData[sym]); renderTrades(allData[sym]); }
+  renderChart(sym);
+  $('sym-strip').querySelector('.chip.active')
+    ?.scrollIntoView({behavior:'smooth',inline:'nearest',block:'nearest'});
+}
+
+// ── poll trading ───────────────────────────────────────────────
+async function refreshTrading() {
+  try {
+    const data = await (await fetch('/api/status')).json();
+    allData = data;
+    const syms = Object.keys(data);
+    if (!selected && syms.length) select(syms[0]);
+    else { renderStrip(); if (selected&&data[selected]) { renderCards(selected,data[selected]); renderTrades(data[selected]); } }
+  } catch(_) {}
+}
+
+// ── model page ─────────────────────────────────────────────────
+async function refreshModel() {
+  try {
+    const d = await (await fetch('/api/model')).json();
+    renderModel(d);
+  } catch(_) {}
+}
+
+function renderModel(d) {
+  const st = d.status ?? 'idle';
+  const stColor = {idle:'var(--t2)',training:'var(--blue)',done:'var(--green)',error:'var(--red)'};
+  const mst = $('m-status');
+  mst.textContent = st.toUpperCase();
+  mst.style.color = stColor[st]??'var(--t2)';
+
+  if (d.trained_at) {
+    $('m-subtitle').textContent = 'Last trained ' + d.trained_at.replace('T',' ').slice(0,19) + ' UTC';
+  }
+
+  $('m-feats').textContent   = d.n_features ? d.n_features.toLocaleString() : '—';
+  $('m-samples').textContent = d.n_samples  ? d.n_samples.toLocaleString()  : '—';
+  $('m-auc').textContent     = d.avg_auc    ? d.avg_auc.toFixed(3)          : '—';
+  $('m-sharpe').textContent  = d.avg_sharpe ? d.avg_sharpe.toFixed(3)       : '—';
+
+  const retEl = $('m-ret');
+  if (d.avg_ret != null) {
+    retEl.textContent  = (d.avg_ret>=0?'+':'')+d.avg_ret.toFixed(2)+'%';
+    retEl.style.color  = d.avg_ret>=0 ? 'var(--green)' : 'var(--red)';
+  } else { retEl.textContent = '—'; retEl.style.color = ''; }
+
+  // buttons
+  const busy = st==='training';
+  $('btn-full').disabled = busy;
+  $('btn-fast').disabled = busy;
+
+  // badge
+  const badge = $('log-badge');
+  badge.textContent = st;
+  badge.className   = 'badge badge-'+st;
+
+  // log timestamp
+  if (d.trained_at) $('log-ts').textContent = d.trained_at.replace('T',' ').slice(0,19)+' UTC';
+
+  // log lines
+  const lb = $('log-body');
+  if (d.log?.length) {
+    const lines = d.log;
+    lb.innerHTML = lines.map((ln,i)=>
+      `<div class="${i>=lines.length-8?'log-new':''}">${esc(ln)}</div>`
+    ).join('');
+    lb.scrollTop = lb.scrollHeight;
+  } else if (st==='idle' && !d.trained_at) {
+    lb.innerHTML = '<span class="log-empty">No training run yet.</span>';
+  }
+
+  // fold table
+  if (d.folds?.length) {
+    const rows = d.folds.map((f,i)=>{
+      const rc = f.total_ret>=0?'color:var(--green)':'color:var(--red)';
+      const sc = f.sharpe>=0.5?'color:var(--green)':f.sharpe<0?'color:var(--red)':'';
+      return `<tr>
+        <td>Fold ${i+1}</td>
+        <td>${f.auc.toFixed(3)}</td>
+        <td style="${sc}">${f.sharpe.toFixed(3)}</td>
+        <td style="${rc}">${f.total_ret>=0?'+':''}${f.total_ret.toFixed(2)}%</td>
+        <td>${f.n_trades}</td>
+        <td>${f.win_rate.toFixed(1)}%</td>
+      </tr>`;
+    }).join('');
+    const ar = d.avg_ret??0;
+    const arc = ar>=0?'color:var(--green)':'color:var(--red)';
+    const avgRow = `<tr class="avg-row">
+      <td>Average</td>
+      <td>${(d.avg_auc??0).toFixed(3)}</td>
+      <td>${(d.avg_sharpe??0).toFixed(3)}</td>
+      <td style="${arc}">${ar>=0?'+':''}${ar.toFixed(2)}%</td>
+      <td>—</td><td>—</td>
+    </tr>`;
+    $('fold-body').innerHTML = rows + avgRow;
+  }
+
+  // feature importance
+  if (d.feature_importance?.length) {
+    const max = d.feature_importance[0].score;
+    $('feat-box').innerHTML = d.feature_importance.map(f=>`
+      <div class="feat-row">
+        <div class="feat-name">${esc(f.name)}</div>
+        <div class="feat-track">
+          <div class="feat-fill" style="width:${(f.score/max*100).toFixed(1)}%"></div>
+        </div>
+        <div class="feat-score">${f.score.toFixed(4)}</div>
+      </div>`).join('');
+  }
+}
+
+async function startTrain(fast) {
+  $('btn-full').disabled = true;
+  $('btn-fast').disabled = true;
+  $('log-body').innerHTML = '<span class="log-empty">Launching training process…</span>';
+  try { await fetch('/api/train'+(fast?'?fast=1':''), {method:'POST'}); } catch(_){}
+  setTimeout(refreshModel, 800);
+}
+
+// ── portfolio page ─────────────────────────────────────────────
+async function refreshPortfolio() {
+  try {
+    const d = await (await fetch('/api/portfolio')).json();
+    renderPortfolio(d);
+  } catch(_) {}
+}
+
+function renderPortfolio(d) {
+  $('pf-total').textContent    = '$' + fmt(d.total_value);
+  $('pf-invested').textContent = '$' + fmt(d.total_invested);
+  $('pf-syms').textContent     = d.n_symbols ?? '—';
+
+  const pnlEl  = $('pf-pnl');
+  const pnlPct = d.total_pnl_pct ?? 0;
+  pnlEl.textContent = (pnlPct >= 0 ? '+' : '') + fmt(pnlPct) + '%';
+  pnlEl.className   = 'pf-val ' + (pnlPct >= 0 ? 'up' : 'dn');
+
+  if (d.equity_history?.length > 1) {
+    $('eq-empty').style.display  = 'none';
+    $('eq-canvas').style.display = 'block';
+    drawEquityCurve(d.equity_history);
+  }
+
+  if (d.performers?.length) {
+    $('pf-body').innerHTML = d.performers.map(p => {
+      const pnlCls = p.pnl_pct >= 0 ? 'tr-buy' : 'tr-sell';
+      const pnlStr = (p.pnl_pct >= 0 ? '+' : '') + fmt(p.pnl_pct) + '%';
+      const sigCls = p.signal === 'BUY' ? 'tr-buy' : p.signal === 'SELL' ? 'tr-sell' : '';
+      return `<tr>
+        <td>${esc(p.symbol)}</td>
+        <td>${p.price != null ? '$' + fmt(p.price) : '—'}</td>
+        <td>$${fmt(p.portfolio)}</td>
+        <td class="${pnlCls}">${pnlStr}</td>
+        <td>${p.trades}</td>
+        <td class="${sigCls}">${esc(p.signal)}</td>
+      </tr>`;
+    }).join('');
+  }
+}
+
+function drawEquityCurve(history) {
+  const canvas = $('eq-canvas');
+  if (!canvas) return;
+  const dpr  = window.devicePixelRatio || 1;
+  const wrap = $('eq-canvas-wrap');
+  const W    = wrap.clientWidth;
+  const H    = wrap.clientHeight;
+  canvas.width  = W * dpr;
+  canvas.height = H * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const values = history.map(h => h.v);
+  const minV   = Math.min(...values);
+  const maxV   = Math.max(...values);
+  const range  = maxV - minV || 1;
+  const pad    = { t: 12, r: 12, b: 28, l: 68 };
+  const w      = W - pad.l - pad.r;
+  const h      = H - pad.t - pad.b;
+
+  ctx.clearRect(0, 0, W, H);
+
+  // grid lines + y-axis labels
+  ctx.font      = '10px JetBrains Mono, monospace';
+  ctx.textAlign = 'right';
+  for (let i = 0; i <= 4; i++) {
+    const y   = pad.t + (h / 4) * i;
+    const val = maxV - (range / 4) * i;
+    ctx.strokeStyle = '#1c1c1c';
+    ctx.lineWidth   = 1;
+    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(pad.l + w, y); ctx.stroke();
+    ctx.fillStyle = '#555';
+    ctx.fillText('$' + Math.round(val).toLocaleString(), pad.l - 6, y + 4);
+  }
+
+  const isUp = values[values.length - 1] >= values[0];
+  const lineColor = isUp ? '#22c55e' : '#ef4444';
+
+  // build path
+  ctx.beginPath();
+  values.forEach((v, i) => {
+    const x = pad.l + (i / (values.length - 1)) * w;
+    const y = pad.t + h - ((v - minV) / range) * h;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+
+  // fill under the line
+  const lastX = pad.l + (values.length - 1) / (values.length - 1) * w;
+  ctx.lineTo(lastX, pad.t + h);
+  ctx.lineTo(pad.l, pad.t + h);
+  ctx.closePath();
+  const grad = ctx.createLinearGradient(0, pad.t, 0, pad.t + h);
+  grad.addColorStop(0, isUp ? 'rgba(34,197,94,0.18)' : 'rgba(239,68,68,0.18)');
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // stroke the line on top
+  ctx.beginPath();
+  values.forEach((v, i) => {
+    const x = pad.l + (i / (values.length - 1)) * w;
+    const y = pad.t + h - ((v - minV) / range) * h;
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = lineColor;
+  ctx.lineWidth   = 2;
+  ctx.stroke();
+}
+
+// ── main ───────────────────────────────────────────────────────
+refreshTrading();
+setInterval(refreshTrading, 5000);
+setInterval(() => { if (curPage === 'model')     refreshModel();     }, 2000);
+setInterval(() => { if (curPage === 'portfolio') refreshPortfolio(); }, 5000);
+</script>
+</body>
+</html>
