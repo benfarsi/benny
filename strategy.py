@@ -40,7 +40,8 @@ def get_signal(
     low:        list[float] | None = None,
     volume:     list[float] | None = None,
     timestamps: list[float] | None = None,
-) -> tuple[str, float, float]:
+) -> tuple[str, float, float, float | None]:
+    """Returns (signal, rsi, ema, ml_proba). ml_proba is None when ML model unavailable."""
     ema = calculate_ema(closes, EMA_PERIOD)
     rsi = calculate_rsi(closes, RSI_PERIOD)
 
@@ -57,11 +58,11 @@ def get_signal(
                 proba = float(_ml["model"].predict_proba(row)[0, 1])
 
                 if proba > BUY_CONF:
-                    return "BUY", rsi, ema
+                    return "BUY", rsi, ema, proba
                 elif proba < SELL_CONF:
-                    return "SELL", rsi, ema
+                    return "SELL", rsi, ema, proba
                 else:
-                    return "HOLD", rsi, ema
+                    return "HOLD", rsi, ema, proba
         except Exception:
             pass
 
@@ -74,7 +75,7 @@ def get_signal(
     else:
         signal = "HOLD"
 
-    return signal, rsi, ema
+    return signal, rsi, ema, None
 
 
 def reload_model():

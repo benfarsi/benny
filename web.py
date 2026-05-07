@@ -1,3 +1,4 @@
+import csv
 import json
 import os
 import subprocess
@@ -14,6 +15,7 @@ from config import (
     CANDLE_LIMIT, CRYPTO_SYMBOLS, SLEEP_SECONDS, STARTING_BALANCE,
     STOCK_SYMBOLS, TAKE_PROFIT, STOP_LOSS, TIMEFRAME,
 )
+from report import generate_report
 from strategy import get_signal
 from trader import PaperTrader
 
@@ -22,6 +24,33 @@ app = Flask(__name__)
 _HERE         = os.path.dirname(os.path.abspath(__file__))
 _MODEL_META   = os.path.join(_HERE, "data", "model_meta.json")
 _TRAIN_SCRIPT = os.path.join(_HERE, "train.py")
+_SNAPSHOT     = os.path.join(_HERE, "data", "snapshot.json")
+_TRADE_LOG    = os.path.join(_HERE, "data", "trades.csv")
+
+_LOG_FIELDS = ["time", "symbol", "side", "price", "qty", "usdt_after", "portfolio", "pnl_pct", "ml_proba", "trigger"]
+_log_lock   = threading.Lock()
+
+
+def _append_trade(*, symbol, side, price, qty, usdt_after, portfolio, pnl_pct, ml_proba, trigger):
+    os.makedirs(os.path.dirname(_TRADE_LOG), exist_ok=True)
+    write_header = not os.path.exists(_TRADE_LOG)
+    with _log_lock:
+        with open(_TRADE_LOG, "a", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=_LOG_FIELDS)
+            if write_header:
+                w.writeheader()
+            w.writerow({
+                "time":       datetime.utcnow().isoformat(timespec="seconds"),
+                "symbol":     symbol,
+                "side":       side,
+                "price":      round(price, 6),
+                "qty":        round(qty, 8),
+                "usdt_after": round(usdt_after, 2),
+                "portfolio":  round(portfolio, 2),
+                "pnl_pct":    round(pnl_pct, 4),
+                "ml_proba":   round(ml_proba, 4) if ml_proba is not None else "",
+                "trigger":    trigger,
+            })
 
 _train_state = {"status": "idle", "log": [], "error": None}
 _train_lock  = threading.Lock()
@@ -61,6 +90,7 @@ def _blank_state():
         "rsi":           None,
         "ema":           None,
         "signal":        "—",
+        "ml_proba":      None,
         "usdt":          STARTING_BALANCE,
         "asset":         0.0,
         "portfolio":     STARTING_BALANCE,
@@ -80,6 +110,42 @@ _lock      = threading.Lock()
 
 _equity_history: list[dict] = []
 _eq_lock = threading.Lock()
+
+
+def _save_snapshot() -> None:
+    os.makedirs(os.path.dirname(_SNAPSHOT), exist_ok=True)
+    payload = {
+        "traders": {
+            sym: {"usdt": tr.usdt, "btc": tr.btc, "trades": tr.trades}
+            for sym, tr in traders.items()
+        },
+        "buy_prices":     buy_prices,
+        "equity_history": _equity_history,
+    }
+    tmp = _SNAPSHOT + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(payload, f)
+    os.replace(tmp, _SNAPSHOT)  # atomic write
+
+
+def _load_snapshot() -> None:
+    if not os.path.exists(_SNAPSHOT):
+        return
+    try:
+        with open(_SNAPSHOT) as f:
+            payload = json.load(f)
+        for sym, data in payload.get("traders", {}).items():
+            if sym in traders:
+                traders[sym].usdt   = data["usdt"]
+                traders[sym].btc    = data["btc"]
+                traders[sym].trades = data["trades"]
+        for sym, bp in payload.get("buy_prices", {}).items():
+            if sym in buy_prices:
+                buy_prices[sym] = bp
+        _equity_history.extend(payload.get("equity_history", []))
+        print(f"[snapshot] restored from {_SNAPSHOT}")
+    except Exception as exc:
+        print(f"[snapshot] load failed, starting fresh: {exc}")
 
 
 def _crypto_ohlcv(exchange, symbol):
@@ -112,6 +178,7 @@ def _stock_ohlcv(symbol):
 
 
 def bot_loop():
+    _load_snapshot()
     exchange = ccxt.binance({"enableRateLimit": True})
     while True:
         for sym in ALL_SYMBOLS:
@@ -124,23 +191,40 @@ def bot_loop():
                 if len(closes) < 20:
                     continue
 
-                price            = closes[-1]
-                signal, rsi, ema = get_signal(closes, high=high, low=low, volume=volume, timestamps=timestamps)
-                tr               = traders[sym]
+                price                    = closes[-1]
+                signal, rsi, ema, proba  = get_signal(closes, high=high, low=low, volume=volume, timestamps=timestamps)
+                tr                       = traders[sym]
 
-                bp = buy_prices[sym]
+                bp      = buy_prices[sym]
+                trigger = "ml"
                 if bp is not None and tr.btc > 0:
                     if price >= bp * (1 + TAKE_PROFIT):
-                        signal = "SELL"
+                        signal  = "SELL"
+                        trigger = "take_profit"
                     elif price <= bp * (1 - STOP_LOSS):
-                        signal = "SELL"
+                        signal  = "SELL"
+                        trigger = "stop_loss"
 
                 if signal == "BUY" and tr.btc == 0:
+                    qty_before = tr.btc
                     if tr.buy(price):
                         buy_prices[sym] = price
+                        total   = tr.portfolio_value(price)
+                        pnl_pct = (total - STARTING_BALANCE) / STARTING_BALANCE * 100
+                        _append_trade(symbol=sym, side="BUY", price=price,
+                                      qty=tr.btc - qty_before, usdt_after=tr.usdt,
+                                      portfolio=total, pnl_pct=pnl_pct,
+                                      ml_proba=proba, trigger=trigger)
                 elif signal == "SELL" and tr.btc > 0:
+                    qty_before = tr.btc
                     if tr.sell(price):
                         buy_prices[sym] = None
+                        total   = tr.portfolio_value(price)
+                        pnl_pct = (total - STARTING_BALANCE) / STARTING_BALANCE * 100
+                        _append_trade(symbol=sym, side="SELL", price=price,
+                                      qty=qty_before, usdt_after=tr.usdt,
+                                      portfolio=total, pnl_pct=pnl_pct,
+                                      ml_proba=proba, trigger=trigger)
 
                 total   = tr.portfolio_value(price)
                 pnl_pct = (total - STARTING_BALANCE) / STARTING_BALANCE * 100
@@ -151,6 +235,7 @@ def bot_loop():
                         rsi           = round(rsi,   2),
                         ema           = round(ema,   2),
                         signal        = signal,
+                        ml_proba      = round(proba, 4) if proba is not None else None,
                         usdt          = round(tr.usdt, 2),
                         asset         = round(tr.btc,  6),
                         portfolio     = round(total,   2),
@@ -180,6 +265,7 @@ def bot_loop():
             if len(_equity_history) > 500:
                 _equity_history.pop(0)
 
+        _save_snapshot()
         time.sleep(SLEEP_SECONDS)
 
 
@@ -242,6 +328,7 @@ def api_portfolio():
                 "pnl_pct":  s.get("pnl_pct") or 0.0,
                 "trades":   s.get("trades_count") or 0,
                 "signal":   s.get("signal") or "—",
+                "ml_proba": s.get("ml_proba"),
                 "price":    s.get("price"),
             })
         performers.sort(key=lambda x: x["pnl_pct"], reverse=True)
@@ -258,6 +345,26 @@ def api_portfolio():
         "performers":     performers,
         "equity_history": history,
     })
+
+
+@app.route("/api/report")
+def api_report():
+    return jsonify(_sanitize(generate_report()))
+
+
+@app.route("/api/trades")
+def api_trades():
+    from flask import send_file, Response
+    if not os.path.exists(_TRADE_LOG):
+        return jsonify([])
+    # return as downloadable CSV if ?download=1, otherwise JSON
+    if request.args.get("download") == "1":
+        return send_file(_TRADE_LOG, mimetype="text/csv",
+                         as_attachment=True, download_name="benny_trades.csv")
+    rows = []
+    with open(_TRADE_LOG, newline="") as f:
+        rows = list(csv.DictReader(f))
+    return jsonify(rows)
 
 
 @app.route("/")

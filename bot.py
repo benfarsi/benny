@@ -32,7 +32,7 @@ def main() -> None:
         try:
             closes, high, low, volume, timestamps = fetch_ohlcv(exchange)
             price = closes[-1]
-            signal, rsi, ema = get_signal(closes, high=high, low=low, volume=volume, timestamps=timestamps)
+            signal, rsi, ema, _ = get_signal(closes, high=high, low=low, volume=volume, timestamps=timestamps)
 
             if signal == "BUY":
                 trader.buy(price)

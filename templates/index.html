@@ -323,6 +323,36 @@
       height: 180px; display: flex; align-items: center; justify-content: center;
       color: var(--t3); font-size: 13px;
     }
+
+    /* ── report page ─────────────────────────────────────────────── */
+    .rp-cards { display: grid; grid-template-columns: repeat(auto-fill,minmax(160px,1fr)); gap: 12px; margin-bottom: 28px; }
+    .rp-card  { background: var(--s1); border: 1px solid var(--b1); border-radius: 10px; padding: 16px 18px; }
+    .rp-label { font-size: 11px; font-weight: 600; color: var(--t2); letter-spacing: .08em; text-transform: uppercase; margin-bottom: 6px; }
+    .rp-val   { font-size: 22px; font-weight: 700; font-family: var(--mono); }
+    .rp-sub   { font-size: 11px; color: var(--t3); margin-top: 3px; }
+
+    .rec-list { list-style: none; display: flex; flex-direction: column; gap: 10px; margin-bottom: 28px; }
+    .rec-item { display: flex; gap: 12px; align-items: flex-start; background: var(--s1); border: 1px solid var(--b1); border-radius: 8px; padding: 13px 16px; font-size: 13px; line-height: 1.5; }
+    .rec-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+    .rec-item.positive { border-color: rgba(34,197,94,.25); }
+    .rec-item.negative { border-color: rgba(239,68,68,.25); }
+    .rec-item.warn     { border-color: rgba(245,158,11,.25); }
+    .rec-item.tip      { border-color: rgba(59,130,246,.25); }
+
+    .trig-grid { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 28px; }
+    .trig-card { background: var(--s1); border: 1px solid var(--b1); border-radius: 8px; padding: 12px 18px; min-width: 140px; }
+    .trig-name { font-size: 11px; color: var(--t2); font-weight: 600; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 4px; }
+    .trig-val  { font-size: 18px; font-weight: 700; font-family: var(--mono); }
+    .trig-sub  { font-size: 11px; color: var(--t3); }
+
+    .ml-row    { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 28px; }
+    .ml-card   { background: var(--s1); border: 1px solid var(--b1); border-radius: 8px; padding: 12px 18px; flex: 1; min-width: 160px; }
+
+    .up { color: var(--green); }
+    .dn { color: var(--red); }
+    .neu { color: var(--t2); }
+
+    #rp-dl-btn { margin-bottom: 28px; }
   </style>
 </head>
 <body>
@@ -333,6 +363,7 @@
     <div class="nav-btn active" onclick="showPage('trading',this)">Trading</div>
     <div class="nav-btn"       onclick="showPage('model',this)">Model</div>
     <div class="nav-btn"       onclick="showPage('portfolio',this)">Portfolio</div>
+    <div class="nav-btn"       onclick="showPage('report',this)">Report</div>
   </div>
   <span id="nav-ts">—</span>
 </nav>
@@ -473,11 +504,85 @@
       <thead>
         <tr>
           <th>Symbol</th><th>Price</th><th>Portfolio</th>
-          <th>P&amp;L</th><th>Trades</th><th>Signal</th>
+          <th>P&amp;L</th><th>Trades</th><th>Signal</th><th>ML Prob</th>
         </tr>
       </thead>
       <tbody id="pf-body">
-        <tr><td colspan="6" class="tr-empty">Loading…</td></tr>
+        <tr><td colspan="7" class="tr-empty">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════════ REPORT PAGE ══════════════════════ -->
+<div class="page" id="page-report">
+
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+    <div>
+      <div style="font-size:18px;font-weight:700;">Quant Report</div>
+      <div style="font-size:12px;color:var(--t3);margin-top:3px;">Analysis of all completed round-trip trades</div>
+    </div>
+    <div style="display:flex;gap:10px;">
+      <button class="btn btn-ghost" onclick="refreshReport()">Refresh</button>
+      <a id="rp-dl-btn" href="/api/trades?download=1" class="btn btn-ghost" style="text-decoration:none;">Download CSV</a>
+    </div>
+  </div>
+
+  <!-- summary cards -->
+  <div class="rp-cards" id="rp-cards">
+    <div class="rp-card"><div class="rp-label">Completed Trades</div><div class="rp-val" id="rp-completed">—</div></div>
+    <div class="rp-card"><div class="rp-label">Win Rate</div>        <div class="rp-val" id="rp-winrate">—</div></div>
+    <div class="rp-card"><div class="rp-label">Profit Factor</div>   <div class="rp-val" id="rp-pf">—</div></div>
+    <div class="rp-card"><div class="rp-label">Expectancy/Trade</div><div class="rp-val" id="rp-exp">—</div></div>
+    <div class="rp-card"><div class="rp-label">Avg Win</div>         <div class="rp-val up" id="rp-avgwin">—</div></div>
+    <div class="rp-card"><div class="rp-label">Avg Loss</div>        <div class="rp-val dn" id="rp-avgloss">—</div></div>
+    <div class="rp-card"><div class="rp-label">Best Symbol</div>     <div class="rp-val" id="rp-best">—</div></div>
+    <div class="rp-card"><div class="rp-label">Open Positions</div>  <div class="rp-val" id="rp-open">—</div></div>
+  </div>
+
+  <!-- recommendations -->
+  <div class="sh"><span class="sh-label">Recommendations</span><div class="sh-line"></div></div>
+  <ul class="rec-list" id="rp-recs">
+    <li class="rec-item"><span class="rec-icon">⏳</span><span>Loading…</span></li>
+  </ul>
+
+  <!-- symbol breakdown -->
+  <div class="sh"><span class="sh-label">Performance by Symbol</span><div class="sh-line"></div></div>
+  <div class="tbl-wrap" style="margin-bottom:28px;">
+    <table>
+      <thead><tr>
+        <th>Symbol</th><th>Trades</th><th>Win Rate</th>
+        <th>Avg P&amp;L</th><th>Best Trade</th><th>Worst Trade</th><th>Total P&amp;L</th>
+      </tr></thead>
+      <tbody id="rp-sym-body">
+        <tr><td colspan="7" class="tr-empty">No data</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ML effectiveness -->
+  <div class="sh"><span class="sh-label">ML Signal Quality</span><div class="sh-line"></div></div>
+  <div class="ml-row" id="rp-ml-row">
+    <div class="ml-card"><div class="trig-name">Avg Proba — Winners</div><div class="trig-val up" id="rp-ml-win">—</div></div>
+    <div class="ml-card"><div class="trig-name">Avg Proba — Losers</div> <div class="trig-val dn" id="rp-ml-loss">—</div></div>
+    <div class="ml-card"><div class="trig-name">High-Conf Signals (>45%)</div><div class="trig-val" id="rp-ml-hc">—</div><div class="trig-sub" id="rp-ml-hc-wr"></div></div>
+  </div>
+
+  <!-- trigger breakdown -->
+  <div class="sh"><span class="sh-label">Exit Trigger Breakdown</span><div class="sh-line"></div></div>
+  <div class="trig-grid" id="rp-trigs"></div>
+
+  <!-- recent trades -->
+  <div class="sh" style="margin-top:8px;"><span class="sh-label">Recent Completed Trades</span><div class="sh-line"></div></div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr>
+        <th>Symbol</th><th>Buy Price</th><th>Sell Price</th>
+        <th>P&amp;L</th><th>Exit</th><th>ML Prob (entry)</th><th>Sold At</th>
+      </tr></thead>
+      <tbody id="rp-recent-body">
+        <tr><td colspan="7" class="tr-empty">No completed trades yet.</td></tr>
       </tbody>
     </table>
   </div>
@@ -528,6 +633,7 @@ function showPage(name, el) {
   curPage = name;
   if (name === 'model')     refreshModel();
   if (name === 'portfolio') refreshPortfolio();
+  if (name === 'report')    refreshReport();
 }
 
 // ── strip ──────────────────────────────────────────────────────
@@ -752,7 +858,11 @@ function renderPortfolio(d) {
     $('pf-body').innerHTML = d.performers.map(p => {
       const pnlCls = p.pnl_pct >= 0 ? 'tr-buy' : 'tr-sell';
       const pnlStr = (p.pnl_pct >= 0 ? '+' : '') + fmt(p.pnl_pct) + '%';
-      const sigCls = p.signal === 'BUY' ? 'tr-buy' : p.signal === 'SELL' ? 'tr-sell' : '';
+      const sigCls   = p.signal === 'BUY' ? 'tr-buy' : p.signal === 'SELL' ? 'tr-sell' : '';
+      const probaStr = p.ml_proba != null ? (p.ml_proba * 100).toFixed(1) + '%' : '—';
+      const probaCls = p.ml_proba != null
+        ? (p.ml_proba > 0.30 ? 'tr-buy' : p.ml_proba < 0.08 ? 'tr-sell' : '')
+        : '';
       return `<tr>
         <td>${esc(p.symbol)}</td>
         <td>${p.price != null ? '$' + fmt(p.price) : '—'}</td>
@@ -760,6 +870,7 @@ function renderPortfolio(d) {
         <td class="${pnlCls}">${pnlStr}</td>
         <td>${p.trades}</td>
         <td class="${sigCls}">${esc(p.signal)}</td>
+        <td class="${probaCls}">${probaStr}</td>
       </tr>`;
     }).join('');
   }
@@ -834,11 +945,108 @@ function drawEquityCurve(history) {
   ctx.stroke();
 }
 
+// ── report page ────────────────────────────────────────────────
+const REC_ICON = { positive:'✅', negative:'❌', warn:'⚠️', tip:'💡', need_data:'🔍' };
+const REC_LABEL = { positive:'positive', negative:'negative', warn:'warn', tip:'tip', need_data:'tip' };
+
+async function refreshReport() {
+  try {
+    const d = await (await fetch('/api/report')).json();
+    renderReport(d);
+  } catch(_) {}
+}
+
+function renderReport(d) {
+  const s = d.summary;
+  const fmtPct = v => v == null ? '—' : (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
+  const cls    = v => v == null ? '' : v >= 0 ? 'up' : 'dn';
+
+  $('rp-completed').textContent = s.completed_trades ?? '—';
+  $('rp-open').textContent      = s.open_positions   ?? '—';
+  $('rp-best').textContent      = s.best_symbol      ?? '—';
+
+  const wrEl = $('rp-winrate');
+  wrEl.textContent = s.win_rate != null ? s.win_rate + '%' : '—';
+  wrEl.className   = 'rp-val ' + cls(s.win_rate != null ? s.win_rate - 50 : null);
+
+  const pfEl = $('rp-pf');
+  pfEl.textContent = s.profit_factor != null ? s.profit_factor.toFixed(2) : '—';
+  pfEl.className   = 'rp-val ' + (s.profit_factor != null ? (s.profit_factor >= 1 ? 'up' : 'dn') : '');
+
+  const expEl = $('rp-exp');
+  expEl.textContent = fmtPct(s.expectancy);
+  expEl.className   = 'rp-val ' + cls(s.expectancy);
+
+  $('rp-avgwin').textContent  = s.avg_win  != null ? '+' + s.avg_win.toFixed(2)  + '%' : '—';
+  $('rp-avgloss').textContent = s.avg_loss != null ? s.avg_loss.toFixed(2) + '%' : '—';
+
+  // recommendations
+  $('rp-recs').innerHTML = (d.recommendations || []).map(raw => {
+    const [type, ...rest] = raw.split(': ');
+    const text = rest.join(': ');
+    const icon  = REC_ICON[type]  || '•';
+    const klass = REC_LABEL[type] || '';
+    return `<li class="rec-item ${klass}"><span class="rec-icon">${icon}</span><span>${esc(text)}</span></li>`;
+  }).join('');
+
+  // symbol breakdown
+  $('rp-sym-body').innerHTML = (d.by_symbol || []).length
+    ? d.by_symbol.map(r => {
+        const ac = cls(r.avg_pnl); const tc = cls(r.total_pnl);
+        return `<tr>
+          <td>${esc(r.symbol)}</td>
+          <td>${r.trades}</td>
+          <td class="${r.win_rate>=50?'tr-buy':'tr-sell'}">${r.win_rate}%</td>
+          <td class="${ac}">${fmtPct(r.avg_pnl)}</td>
+          <td class="up">+${r.best_trade.toFixed(2)}%</td>
+          <td class="dn">${r.worst_trade.toFixed(2)}%</td>
+          <td class="${tc}">${fmtPct(r.total_pnl)}</td>
+        </tr>`;
+      }).join('')
+    : '<tr><td colspan="7" class="tr-empty">No completed trades yet.</td></tr>';
+
+  // ML effectiveness
+  const ml = d.ml_effectiveness;
+  if (ml) {
+    $('rp-ml-win').textContent  = ml.avg_proba_winners != null ? (ml.avg_proba_winners*100).toFixed(1)+'%' : '—';
+    $('rp-ml-loss').textContent = ml.avg_proba_losers  != null ? (ml.avg_proba_losers *100).toFixed(1)+'%' : '—';
+    $('rp-ml-hc').textContent   = ml.n_high_conf;
+    $('rp-ml-hc-wr').textContent = ml.n_high_conf > 0 ? ml.win_rate_high_conf + '% win rate' : 'no signals yet';
+  }
+
+  // trigger breakdown
+  $('rp-trigs').innerHTML = Object.entries(d.trigger_breakdown || {}).map(([name, v]) => `
+    <div class="trig-card">
+      <div class="trig-name">${esc(name.replace('_',' '))}</div>
+      <div class="trig-val">${v.count}</div>
+      <div class="trig-sub">${v.win_rate}% win rate</div>
+    </div>`).join('') || '<span style="color:var(--t3);font-size:13px;">No exits yet.</span>';
+
+  // recent pairs
+  $('rp-recent-body').innerHTML = (d.recent_pairs || []).length
+    ? d.recent_pairs.map(p => {
+        const pc = p.pnl_pct >= 0 ? 'tr-buy' : 'tr-sell';
+        const ps = (p.pnl_pct >= 0 ? '+' : '') + p.pnl_pct.toFixed(3) + '%';
+        const mp = p.ml_proba != null ? (p.ml_proba*100).toFixed(1)+'%' : '—';
+        return `<tr>
+          <td>${esc(p.symbol)}</td>
+          <td>$${fmt(p.buy_price)}</td>
+          <td>$${fmt(p.sell_price)}</td>
+          <td class="${pc}">${ps}</td>
+          <td>${esc(p.trigger.replace('_',' '))}</td>
+          <td>${mp}</td>
+          <td style="font-family:var(--mono);font-size:11px;">${esc(p.sell_time)}</td>
+        </tr>`;
+      }).join('')
+    : '<tr><td colspan="7" class="tr-empty">No completed trades yet.</td></tr>';
+}
+
 // ── main ───────────────────────────────────────────────────────
 refreshTrading();
 setInterval(refreshTrading, 5000);
 setInterval(() => { if (curPage === 'model')     refreshModel();     }, 2000);
 setInterval(() => { if (curPage === 'portfolio') refreshPortfolio(); }, 5000);
+setInterval(() => { if (curPage === 'report')    refreshReport();    }, 30000);
 </script>
 </body>
 </html>

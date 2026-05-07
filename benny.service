@@ -1,0 +1,17 @@
+[Unit]
+Description=Benny Trading Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=t1ny
+WorkingDirectory=/home/t1ny/ben/benny
+ExecStart=/usr/bin/python3 web.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

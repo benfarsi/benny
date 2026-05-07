@@ -1,7 +1,10 @@
-# data — CSVs are too large for git, regenerate with collector.py
-data/*.csv
-data/model.pkl
+# data — price CSVs are too large for git, regenerate with collector.py
+data/*_USDT_*.csv
+data/*.pkl
 data/model_meta.json
+# snapshot + trade log are tracked — persistent state
+!data/snapshot.json
+!data/trades.csv
 
 # python
 __pycache__/

@@ -12,10 +12,12 @@ CANDLE_LIMIT  = 300
 TAKE_PROFIT = 0.03
 STOP_LOSS   = 0.015
 
-# ML signal thresholds — raise BUY_CONF to only trade when very confident,
-# so 0.1% fees don't eat the edge on marginal calls.
-BUY_CONF  = 0.65
-SELL_CONF = 0.35
+# ML signal thresholds.
+# Recent BTC data: positive class rate ~20%, model max proba ~0.67,
+# p90=0.28, p99=0.46. Old thresholds (0.65/0.35) were calibrated for a
+# bull market and essentially never fire in a sideways/bearish regime.
+BUY_CONF  = 0.30   # top ~8% of signals → fires roughly every 12–20 min
+SELL_CONF = 0.08   # below median → exit when model is not confident
 
 # Focus on liquid crypto only — model trained on BTC/USDT crypto data.
 # Stocks removed until a separate stock model is trained.
