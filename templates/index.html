@@ -68,6 +68,21 @@
       color: var(--t3); font-family: var(--mono);
     }
 
+    .halt-bar {
+      display: none; background: rgba(239,68,68,.12); border: 1px solid rgba(239,68,68,.4);
+      border-radius: 8px; padding: 12px 18px; margin-bottom: 18px;
+      font-size: 13px; color: var(--red); display: none;
+      align-items: center; gap: 14px;
+    }
+    .halt-bar.visible { display: flex; }
+    .halt-msg { flex: 1; }
+    .halt-resume {
+      background: none; border: 1px solid var(--red); color: var(--red);
+      border-radius: 6px; padding: 5px 14px; font-size: 12px; font-weight: 600;
+      cursor: pointer; white-space: nowrap;
+    }
+    .halt-resume:hover { background: rgba(239,68,68,.15); }
+
     /* ── pages ───────────────────────────────────────────────────── */
     .page { display: none; padding: 32px 40px 60px; }
     .page.active { display: block; }
@@ -353,6 +368,64 @@
     .neu { color: var(--t2); }
 
     #rp-dl-btn { margin-bottom: 28px; }
+
+    /* ── public-mode badge ───────────────────────────────────────── */
+    .public-badge {
+      font-size: 10px; font-weight: 700; letter-spacing: .1em;
+      text-transform: uppercase; padding: 3px 9px; border-radius: 100px;
+      background: rgba(59,130,246,.12); color: var(--blue);
+      border: 1px solid rgba(59,130,246,.3);
+    }
+
+    /* ── about modal ─────────────────────────────────────────────── */
+    .modal-mask {
+      position: fixed; inset: 0; background: rgba(0,0,0,.7);
+      display: none; align-items: flex-start; justify-content: center;
+      z-index: 200; padding: 60px 20px 20px;
+      overflow-y: auto;
+    }
+    .modal-mask.open { display: flex; }
+    .modal {
+      background: var(--s1); border: 1px solid var(--b1); border-radius: 12px;
+      max-width: 680px; width: 100%; padding: 36px;
+      position: relative;
+    }
+    .modal h2 { font-size: 22px; font-weight: 800; margin-bottom: 6px; }
+    .modal .sub { font-size: 13px; color: var(--t2); margin-bottom: 22px; }
+    .modal h3 { font-size: 13px; font-weight: 700; letter-spacing: .08em;
+                text-transform: uppercase; color: var(--t3);
+                margin: 22px 0 10px; }
+    .modal p, .modal li {
+      font-size: 14px; line-height: 1.65; color: var(--t1);
+    }
+    .modal ul { padding-left: 18px; margin-top: 4px; }
+    .modal a { color: var(--blue); text-decoration: none; }
+    .modal a:hover { text-decoration: underline; }
+    .modal-close {
+      position: absolute; top: 14px; right: 14px; background: none;
+      border: none; color: var(--t2); font-size: 22px; cursor: pointer;
+      line-height: 1; padding: 6px 10px;
+    }
+    .modal-close:hover { color: var(--t1); }
+
+    /* ── footer ──────────────────────────────────────────────────── */
+    footer {
+      border-top: 1px solid var(--b1); padding: 22px 40px;
+      display: flex; gap: 20px; align-items: center; justify-content: space-between;
+      font-size: 12px; color: var(--t3); margin-top: 40px; flex-wrap: wrap;
+    }
+    footer a { color: var(--t2); text-decoration: none; }
+    footer a:hover { color: var(--t1); }
+
+    /* ── mobile ──────────────────────────────────────────────────── */
+    @media (max-width: 700px) {
+      nav    { padding: 0 16px; gap: 12px; height: 52px; }
+      .page  { padding: 22px 16px 40px; }
+      footer { padding: 18px 16px; }
+      #nav-ts, .public-badge { display: none; }
+      .nav-btn { padding: 5px 10px; font-size: 12px; }
+      .logo { font-size: 17px; }
+    }
   </style>
 </head>
 <body>
@@ -364,15 +437,59 @@
     <div class="nav-btn"       onclick="showPage('model',this)">Model</div>
     <div class="nav-btn"       onclick="showPage('portfolio',this)">Portfolio</div>
     <div class="nav-btn"       onclick="showPage('report',this)">Report</div>
+    <div class="nav-btn"       onclick="openAbout()">About</div>
   </div>
+  <span class="public-badge" id="public-badge" style="display:none;">Read-only demo</span>
   <span id="nav-ts">—</span>
 </nav>
+
+<!-- ═══════════════════════════ ABOUT MODAL ══════════════════════ -->
+<div class="modal-mask" id="about-modal" onclick="if(event.target===this)closeAbout()">
+  <div class="modal">
+    <button class="modal-close" onclick="closeAbout()">&times;</button>
+    <h2>Benny</h2>
+    <div class="sub">An ML-driven crypto paper trading bot — built as a learning project.</div>
+
+    <p>
+      Benny watches six crypto pairs on Binance, generates a per-minute feature
+      vector (volatility regimes, RSI, MACD, GARCH cond-vol, Fear &amp; Greed,
+      session-of-day, and ~45 others), and asks an XGBoost classifier
+      &ldquo;does this look like a setup that goes up at least 0.3% in the next
+      hour?&rdquo; If yes, it buys with ATR-sized risk and exits via take-profit,
+      stop-loss, or a drawdown halt at the portfolio level.
+    </p>
+
+    <h3>What you&rsquo;re looking at</h3>
+    <ul>
+      <li><b>Trading</b> &mdash; live price/signal/RSI for the selected symbol with the TradingView chart.</li>
+      <li><b>Model</b> &mdash; walk-forward CV results and feature importance for the trained XGBoost classifier.</li>
+      <li><b>Portfolio</b> &mdash; aggregate equity curve and per-symbol P&amp;L.</li>
+      <li><b>Report</b> &mdash; round-trip trade analysis (win rate, profit factor, expectancy, ML signal quality).</li>
+    </ul>
+
+    <h3>Honest caveats</h3>
+    <ul>
+      <li>This is <b>paper trading only</b> &mdash; no real money is involved.</li>
+      <li>Sample sizes are tiny (paper test is ~2 weeks). Trust expectancy &amp; profit factor over short-window Sharpe.</li>
+      <li>The CV in <i>Model</i> is a proper temporal walk-forward (no cross-symbol leakage). Backtest still optimistic vs. live (slippage, regime change).</li>
+    </ul>
+
+    <h3>Stack</h3>
+    <p>Python / Flask / XGBoost / ccxt (Binance) / arch (GARCH) / pure-canvas charts. ~1.5k LOC.</p>
+  </div>
+</div>
 
 <!-- ══════════════════════════ TRADING PAGE ═══════════════════════ -->
 <div class="page active" id="page-trading">
 
   <div class="strip-wrap">
     <div class="strip" id="sym-strip"></div>
+  </div>
+
+  <div class="halt-bar" id="halt-bar">
+    <span>🛑</span>
+    <span class="halt-msg" id="halt-msg">Trading halted.</span>
+    <button class="halt-resume" onclick="resumeTrading()">Resume Trading</button>
   </div>
 
   <div class="err-bar" id="err-bar"></div>
@@ -589,6 +706,15 @@
 
 </div>
 
+<footer>
+  <div>Benny &mdash; paper trading only, no real money. Last updated <span id="footer-ts">—</span></div>
+  <div>
+    <a href="#" onclick="openAbout();return false;">About</a>
+    &nbsp;·&nbsp;
+    <a id="footer-gh" href="https://github.com/benfarsi/benny" target="_blank" rel="noopener">GitHub</a>
+  </div>
+</footer>
+
 <script src="https://s3.tradingview.com/tv.js"></script>
 <script>
 const TV_MAP = {
@@ -623,6 +749,27 @@ const base = s => s.includes('/')?s.split('/')[0]:s;
 const esc  = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
 let selected = null, chartSym = null, allData = {}, curPage = 'trading';
+let publicMode = false;
+
+// ── about modal ────────────────────────────────────────────────
+function openAbout()  { $('about-modal').classList.add('open');    }
+function closeAbout() { $('about-modal').classList.remove('open'); }
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeAbout(); });
+
+// ── meta (public mode) ─────────────────────────────────────────
+async function loadMeta() {
+  try {
+    const m = await (await fetch('/api/meta')).json();
+    publicMode = !!m.public_mode;
+    if (publicMode) {
+      $('public-badge').style.display = 'inline-block';
+      // Disable train buttons in read-only mode
+      const bf = $('btn-fast'), bu = $('btn-full');
+      if (bf) { bf.disabled = true; bf.title = 'Disabled in read-only public mode'; }
+      if (bu) { bu.disabled = true; bu.title = 'Disabled in read-only public mode'; }
+    }
+  } catch(_) {}
+}
 
 // ── pages ──────────────────────────────────────────────────────
 function showPage(name, el) {
@@ -655,7 +802,8 @@ function renderStrip() {
 
 // ── cards ──────────────────────────────────────────────────────
 function renderCards(sym, d) {
-  $('nav-ts').textContent   = d.timestamp ?? '—';
+  $('nav-ts').textContent    = d.timestamp ?? '—';
+  $('footer-ts').textContent = d.timestamp ?? '—';
   $('c-price').textContent  = d.price!=null ? '$'+fmt(d.price) : '—';
   $('c-ema').textContent    = d.ema!=null   ? '$'+fmt(d.ema)   : '—';
   $('c-rsi').textContent    = fmt(d.rsi,1);
@@ -746,10 +894,18 @@ function renderModel(d) {
     $('m-subtitle').textContent = 'Last trained ' + d.trained_at.replace('T',' ').slice(0,19) + ' UTC';
   }
 
-  $('m-feats').textContent   = d.n_features ? d.n_features.toLocaleString() : '—';
-  $('m-samples').textContent = d.n_samples  ? d.n_samples.toLocaleString()  : '—';
-  $('m-auc').textContent     = d.avg_auc    ? d.avg_auc.toFixed(3)          : '—';
-  $('m-sharpe').textContent  = d.avg_sharpe ? d.avg_sharpe.toFixed(3)       : '—';
+  $('m-feats').textContent   = d.n_features != null ? d.n_features.toLocaleString() : '—';
+  $('m-samples').textContent = d.n_samples  != null ? d.n_samples.toLocaleString()  : '—';
+  $('m-auc').textContent     = d.avg_auc    != null ? d.avg_auc.toFixed(3)          : '—';
+
+  // Sharpe can be negative; color it so honest negative numbers don't look like a bug.
+  const shEl = $('m-sharpe');
+  if (d.avg_sharpe != null) {
+    shEl.textContent = d.avg_sharpe.toFixed(3);
+    shEl.style.color = d.avg_sharpe >= 0.5 ? 'var(--green)'
+                     : d.avg_sharpe <  0   ? 'var(--red)'
+                     : '';
+  } else { shEl.textContent = '—'; shEl.style.color = ''; }
 
   const retEl = $('m-ret');
   if (d.avg_ret != null) {
@@ -838,7 +994,20 @@ async function refreshPortfolio() {
   } catch(_) {}
 }
 
+async function resumeTrading() {
+  await fetch('/api/resume', { method: 'POST' });
+  refreshPortfolio();
+}
+
 function renderPortfolio(d) {
+  // halt banner
+  const haltBar = $('halt-bar');
+  if (d.halt?.active) {
+    $('halt-msg').textContent = d.halt.reason || 'Trading halted due to drawdown.';
+    haltBar.classList.add('visible');
+  } else {
+    haltBar.classList.remove('visible');
+  }
   $('pf-total').textContent    = '$' + fmt(d.total_value);
   $('pf-invested').textContent = '$' + fmt(d.total_invested);
   $('pf-syms').textContent     = d.n_symbols ?? '—';
@@ -1042,6 +1211,7 @@ function renderReport(d) {
 }
 
 // ── main ───────────────────────────────────────────────────────
+loadMeta();
 refreshTrading();
 setInterval(refreshTrading, 5000);
 setInterval(() => { if (curPage === 'model')     refreshModel();     }, 2000);

@@ -12,14 +12,20 @@ import yfinance as yf
 from flask import Flask, jsonify, render_template, request
 
 from config import (
-    CANDLE_LIMIT, CRYPTO_SYMBOLS, SLEEP_SECONDS, STARTING_BALANCE,
+    CANDLE_LIMIT, CRYPTO_SYMBOLS, MAX_DRAWDOWN, SLEEP_SECONDS, STARTING_BALANCE,
     STOCK_SYMBOLS, TAKE_PROFIT, STOP_LOSS, TIMEFRAME,
+    RISK_PCT, ATR_PERIOD, ATR_MULT,
 )
 from report import generate_report
 from strategy import get_signal
 from trader import PaperTrader
 
 app = Flask(__name__)
+
+# Public read-only mode: set BENNY_PUBLIC=1 when deploying somewhere the
+# whole internet can reach. POST endpoints (train, resume) return 403 so
+# random visitors can't kick off training jobs or override the drawdown halt.
+PUBLIC_MODE = os.environ.get("BENNY_PUBLIC", "0") == "1"
 
 _HERE         = os.path.dirname(os.path.abspath(__file__))
 _MODEL_META   = os.path.join(_HERE, "data", "model_meta.json")
@@ -81,6 +87,18 @@ def _run_training(fast: bool) -> None:
             _train_state["error"]  = str(exc)
 
 
+def _calc_atr(high: list, low: list, closes: list, period: int = ATR_PERIOD) -> float | None:
+    if len(closes) < period + 1:
+        return None
+    trs = [
+        max(high[i] - low[i],
+            abs(high[i] - closes[i - 1]),
+            abs(low[i]  - closes[i - 1]))
+        for i in range(1, len(closes))
+    ]
+    return sum(trs[-period:]) / period
+
+
 ALL_SYMBOLS = CRYPTO_SYMBOLS + STOCK_SYMBOLS
 
 
@@ -103,24 +121,32 @@ def _blank_state():
     }
 
 
-states     = {s: _blank_state() for s in ALL_SYMBOLS}
-traders    = {s: PaperTrader()  for s in ALL_SYMBOLS}
-buy_prices = {s: None           for s in ALL_SYMBOLS}
+states      = {s: _blank_state() for s in ALL_SYMBOLS}
+traders     = {s: PaperTrader()  for s in ALL_SYMBOLS}
+buy_prices  = {s: None           for s in ALL_SYMBOLS}
+stop_prices = {s: None           for s in ALL_SYMBOLS}
 _lock      = threading.Lock()
 
 _equity_history: list[dict] = []
 _eq_lock = threading.Lock()
 
+_halt      = {"active": False, "reason": "", "peak": 0.0}
+_halt_lock = threading.Lock()
+
 
 def _save_snapshot() -> None:
     os.makedirs(os.path.dirname(_SNAPSHOT), exist_ok=True)
+    with _halt_lock:
+        halt_snap = dict(_halt)
     payload = {
         "traders": {
             sym: {"usdt": tr.usdt, "btc": tr.btc, "trades": tr.trades}
             for sym, tr in traders.items()
         },
         "buy_prices":     buy_prices,
+        "stop_prices":    stop_prices,
         "equity_history": _equity_history,
+        "halt":           halt_snap,
     }
     tmp = _SNAPSHOT + ".tmp"
     with open(tmp, "w") as f:
@@ -142,7 +168,13 @@ def _load_snapshot() -> None:
         for sym, bp in payload.get("buy_prices", {}).items():
             if sym in buy_prices:
                 buy_prices[sym] = bp
+        for sym, sp in payload.get("stop_prices", {}).items():
+            if sym in stop_prices:
+                stop_prices[sym] = sp
         _equity_history.extend(payload.get("equity_history", []))
+        if "halt" in payload:
+            with _halt_lock:
+                _halt.update(payload["halt"])
         print(f"[snapshot] restored from {_SNAPSHOT}")
     except Exception as exc:
         print(f"[snapshot] load failed, starting fresh: {exc}")
@@ -196,19 +228,37 @@ def bot_loop():
                 tr                       = traders[sym]
 
                 bp      = buy_prices[sym]
+                sp      = stop_prices[sym]
                 trigger = "ml"
                 if bp is not None and tr.btc > 0:
                     if price >= bp * (1 + TAKE_PROFIT):
                         signal  = "SELL"
                         trigger = "take_profit"
-                    elif price <= bp * (1 - STOP_LOSS):
+                    elif sp is not None and price <= sp:
+                        signal  = "SELL"
+                        trigger = "stop_loss"
+                    elif sp is None and price <= bp * (1 - STOP_LOSS):
                         signal  = "SELL"
                         trigger = "stop_loss"
 
-                if signal == "BUY" and tr.btc == 0:
+                with _halt_lock:
+                    halted = _halt["active"]
+
+                if signal == "BUY" and tr.btc == 0 and not halted:
+                    atr = _calc_atr(high, low, closes)
+                    if atr and atr > 0:
+                        stop_dist  = ATR_MULT * atr
+                        risk_usdt  = tr.portfolio_value(price) * RISK_PCT
+                        spend      = min(risk_usdt / (stop_dist / price), tr.usdt * 0.95)
+                        stop_price = price - stop_dist
+                    else:
+                        spend      = tr.usdt * 0.95
+                        stop_price = price * (1 - STOP_LOSS)
+
                     qty_before = tr.btc
-                    if tr.buy(price):
-                        buy_prices[sym] = price
+                    if tr.buy(price, spend_usdt=spend):
+                        buy_prices[sym]  = price
+                        stop_prices[sym] = stop_price
                         total   = tr.portfolio_value(price)
                         pnl_pct = (total - STARTING_BALANCE) / STARTING_BALANCE * 100
                         _append_trade(symbol=sym, side="BUY", price=price,
@@ -218,7 +268,8 @@ def bot_loop():
                 elif signal == "SELL" and tr.btc > 0:
                     qty_before = tr.btc
                     if tr.sell(price):
-                        buy_prices[sym] = None
+                        buy_prices[sym]  = None
+                        stop_prices[sym] = None
                         total   = tr.portfolio_value(price)
                         pnl_pct = (total - STARTING_BALANCE) / STARTING_BALANCE * 100
                         _append_trade(symbol=sym, side="SELL", price=price,
@@ -265,6 +316,19 @@ def bot_loop():
             if len(_equity_history) > 500:
                 _equity_history.pop(0)
 
+        with _halt_lock:
+            if total_eq > _halt["peak"]:
+                _halt["peak"] = total_eq
+            if not _halt["active"] and _halt["peak"] > 0:
+                dd = (_halt["peak"] - total_eq) / _halt["peak"]
+                if dd >= MAX_DRAWDOWN:
+                    _halt["active"] = True
+                    _halt["reason"] = (
+                        f"Portfolio dropped {dd*100:.1f}% from peak "
+                        f"(${_halt['peak']:,.2f} → ${total_eq:,.2f}) — buys halted"
+                    )
+                    print(f"[HALT] {_halt['reason']}")
+
         _save_snapshot()
         time.sleep(SLEEP_SECONDS)
 
@@ -299,6 +363,8 @@ def api_model():
 
 @app.route("/api/train", methods=["POST"])
 def api_train():
+    if PUBLIC_MODE:
+        return jsonify({"error": "training disabled in public mode"}), 403
     with _train_lock:
         if _train_state["status"] == "training":
             return jsonify({"error": "already training"}), 409
@@ -337,6 +403,9 @@ def api_portfolio():
     with _eq_lock:
         history = list(_equity_history)
 
+    with _halt_lock:
+        halt = dict(_halt)
+
     return jsonify({
         "total_value":    round(total_value, 2),
         "total_invested": round(total_invested, 2),
@@ -344,6 +413,32 @@ def api_portfolio():
         "n_symbols":      len(ALL_SYMBOLS),
         "performers":     performers,
         "equity_history": history,
+        "halt":           halt,
+    })
+
+
+@app.route("/api/halt")
+def api_halt_status():
+    with _halt_lock:
+        return jsonify(dict(_halt))
+
+
+@app.route("/api/resume", methods=["POST"])
+def api_resume():
+    if PUBLIC_MODE:
+        return jsonify({"error": "resume disabled in public mode"}), 403
+    with _halt_lock:
+        _halt["active"] = False
+        _halt["reason"] = ""
+    return jsonify({"ok": True})
+
+
+@app.route("/api/meta")
+def api_meta():
+    """Public-facing metadata: are we read-only, when started, etc."""
+    return jsonify({
+        "public_mode": PUBLIC_MODE,
+        "n_symbols":   len(ALL_SYMBOLS),
     })
 
 

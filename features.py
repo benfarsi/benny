@@ -51,7 +51,11 @@ def _garch_vol(returns: pd.Series, window: int = 400) -> pd.Series:
     """
     GARCH(1,1) conditional volatility, refitted on a rolling window.
     σ²_t = ω + α·ε²_{t-1} + β·σ²_{t-1}
-    Window is clamped to half the series length so it always runs on short inputs.
+
+    No look-ahead: a fit on data [0,i) produces a sigma estimate available
+    only at time i, so it's applied to rows [i, i+step). Prior code
+    back-filled it onto [i-step, i), which leaked future information into
+    training rows.
     """
     from arch import arch_model
 
@@ -69,9 +73,8 @@ def _garch_vol(returns: pd.Series, window: int = 400) -> pd.Series:
                 res = arch_model(subset, vol="Garch", p=1, q=1,
                                  dist="t", rescale=False).fit(disp="off")
             sigma = float(res.conditional_volatility.iloc[-1]) / 100
-            end   = min(i, len(returns))
-            start = end - step
-            vol.iloc[start:end] = sigma
+            next_end = min(i + step, len(returns))
+            vol.iloc[i:next_end] = sigma
         except Exception:
             pass
 
@@ -89,6 +92,7 @@ def build(closes: pd.Series,
           low:        pd.Series | None = None,
           volume:     pd.Series | None = None,
           timestamps: pd.Series | None = None,
+          fg_value:   "int | float | pd.Series | None" = None,
           garch:      bool = True) -> pd.DataFrame:
     """
     Build feature matrix. No look-ahead bias — every feature at row t
@@ -205,5 +209,17 @@ def build(closes: pd.Series,
     # ── GARCH(1,1) conditional volatility ────────────────────────────────────
     if garch:
         X["garch_vol"] = _garch_vol(r).values
+
+    # ── Fear & Greed index ────────────────────────────────────────────────────
+    # Scalar = live mode (same value for every row). Series = training mode
+    # (daily value aligned to each candle's date by the caller).
+    if fg_value is not None:
+        if isinstance(fg_value, (int, float)):
+            fg = pd.Series(float(fg_value), index=range(len(c)))
+        else:
+            fg = pd.Series(fg_value, dtype=float).reset_index(drop=True)
+        X["fg_norm"]  = (fg / 100).values          # 0–1 normalized
+        X["fg_fear"]  = (fg < 25).astype(float).values   # extreme fear flag
+        X["fg_greed"] = (fg > 75).astype(float).values   # extreme greed flag
 
     return X.dropna()

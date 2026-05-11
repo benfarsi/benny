@@ -1,7 +1,10 @@
 # data — price CSVs are too large for git, regenerate with collector.py
 data/*_USDT_*.csv
+# trained model weights stay private — the algorithm is in the repo, the
+# weights are mine. Regenerate with `python3 train.py`.
 data/*.pkl
 data/model_meta.json
+data/fg_cache.json
 # snapshot + trade log are tracked — persistent state
 !data/snapshot.json
 !data/trades.csv
@@ -11,6 +14,10 @@ __pycache__/
 *.pyc
 *.pyo
 .env
+
+# vim swap files
+.*.swp
+.*.swo
 
 # ide
 .vscode/

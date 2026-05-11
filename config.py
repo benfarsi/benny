@@ -13,11 +13,14 @@ TAKE_PROFIT = 0.03
 STOP_LOSS   = 0.015
 
 # ML signal thresholds.
-# Recent BTC data: positive class rate ~20%, model max proba ~0.67,
-# p90=0.28, p99=0.46. Old thresholds (0.65/0.35) were calibrated for a
-# bull market and essentially never fire in a sideways/bearish regime.
-BUY_CONF  = 0.30   # top ~8% of signals → fires roughly every 12–20 min
-SELL_CONF = 0.08   # below median → exit when model is not confident
+# SELL_CONF disabled — exits handled by ATR stop-loss and take-profit only.
+BUY_CONF  = 0.50   # high-conviction only — fires far less often
+SELL_CONF = 0.0    # disabled
+
+# ATR-based position sizing + dynamic stop.
+RISK_PCT   = 0.01  # risk 1% of symbol portfolio per trade
+ATR_PERIOD = 14    # ATR lookback
+ATR_MULT   = 1.5   # stop = entry - ATR_MULT × ATR
 
 # Focus on liquid crypto only — model trained on BTC/USDT crypto data.
 # Stocks removed until a separate stock model is trained.
@@ -26,3 +29,5 @@ CRYPTO_SYMBOLS = [
 ]
 
 STOCK_SYMBOLS = []
+
+MAX_DRAWDOWN = 0.08   # halt all buys if portfolio drops 8% from its peak

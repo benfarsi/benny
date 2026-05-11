@@ -17,6 +17,7 @@ from sklearn.metrics import roc_auc_score
 
 from config import SYMBOL, TIMEFRAME, TAKE_PROFIT, STOP_LOSS, BUY_CONF, SELL_CONF, CRYPTO_SYMBOLS
 from features import build
+from sentiment import fetch_fg_history
 
 DATA_DIR   = os.path.join(os.path.dirname(__file__), "data")
 MODEL_FILE = os.path.join(DATA_DIR, "model.pkl")
@@ -68,7 +69,13 @@ def simulate_strategy(proba: pd.Series, prices: pd.Series) -> dict:
 
     final  = usdt + btc * prices.iloc[-1]
     rets   = pd.Series(pnl_list)
-    sharpe = (rets.mean() / rets.std() * np.sqrt(252)) if len(rets) > 1 and rets.std() > 0 else 0.0
+    # Annualize per-trade Sharpe by √(trades/year), not √252 (which assumes daily samples).
+    # TIMEFRAME=1m → 525,600 candles per year, so years_in_fold = len(prices) / 525_600.
+    if len(rets) > 1 and rets.std() > 0:
+        trades_per_year = len(rets) * 525_600 / max(len(prices), 1)
+        sharpe = rets.mean() / rets.std() * np.sqrt(trades_per_year)
+    else:
+        sharpe = 0.0
 
     return {
         "sharpe":    round(sharpe, 3),
@@ -95,7 +102,29 @@ def make_model(fast: bool) -> xgb.XGBClassifier:
     )
 
 
-def cross_validate(X: pd.DataFrame, y: pd.Series, prices: pd.Series, fast: bool):
+def _aggregate_sim(sym_sims: list[dict]) -> dict:
+    """Average per-symbol Sharpe/win-rate, sum trades, and return mean total_ret."""
+    if not sym_sims:
+        return {"sharpe": 0.0, "total_ret": 0.0, "n_trades": 0, "win_rate": 0.0}
+    return {
+        "sharpe":    round(float(np.mean([s["sharpe"]    for s in sym_sims])), 3),
+        "total_ret": round(float(np.mean([s["total_ret"] for s in sym_sims])), 2),
+        "n_trades":  int(sum   ([s["n_trades"]  for s in sym_sims])),
+        "win_rate":  round(float(np.mean([s["win_rate"]  for s in sym_sims])), 1),
+    }
+
+
+def cross_validate(X: pd.DataFrame, y: pd.Series, prices: pd.Series,
+                   sym_ids: pd.Series, fast: bool):
+    """
+    Temporal walk-forward CV.
+
+    Input rows must already be sorted by timestamp (ascending), with sym_ids
+    marking which symbol each row came from. Folds are pure time slices, so
+    train and test never overlap in calendar time. Inside each fold the
+    simulator is run *per symbol* — a single continuous price series across
+    multiple assets would be nonsense.
+    """
     fold_size = len(X) // (N_FOLDS + 1)
     results   = []
 
@@ -110,13 +139,23 @@ def cross_validate(X: pd.DataFrame, y: pd.Series, prices: pd.Series, fast: bool)
         X_tr, y_tr = X.iloc[:tr_end],       y.iloc[:tr_end]
         X_te, y_te = X.iloc[tr_end:te_end], y.iloc[tr_end:te_end]
         p_te       = prices.iloc[tr_end:te_end]
+        s_te       = sym_ids.iloc[tr_end:te_end]
 
         m = make_model(fast)
         m.fit(X_tr, y_tr)
 
         proba  = pd.Series(m.predict_proba(X_te)[:, 1], index=X_te.index)
         auc    = roc_auc_score(y_te, proba)
-        sim    = simulate_strategy(proba, p_te)
+
+        # Per-symbol simulation. Each symbol's rows in the test fold are
+        # already time-ordered because the global sort was by timestamp.
+        sym_sims = []
+        for s in s_te.unique():
+            mask = (s_te == s)
+            if mask.sum() < 2:
+                continue
+            sym_sims.append(simulate_strategy(proba[mask], p_te[mask]))
+        sim = _aggregate_sim(sym_sims)
 
         results.append({"auc": auc, **sim})
         print(
@@ -154,8 +193,12 @@ def train():
     # load all available symbol CSVs, build features per symbol, then combine.
     # features MUST be built per symbol — return calculations cross asset
     # boundaries if we concat first and build after.
-    all_X, all_y, all_p = [], [], []
+    all_X, all_y, all_p, all_ts, all_sym = [], [], [], [], []
     garch = "--fast" not in sys.argv
+
+    print("Fetching Fear & Greed history…")
+    fg_history = fetch_fg_history(days=max(TRAIN_WINDOW_DAYS + 10, 100))
+    print(f"  {len(fg_history)} days of F&G data" if fg_history else "  F&G fetch failed — training without it")
 
     for sym in CRYPTO_SYMBOLS:
         df = _load_symbol(sym)
@@ -170,28 +213,51 @@ def train():
         volume_s     = df["volume"].astype(float).reset_index(drop=True) if "volume"    in df.columns else None
         timestamps_s = df["timestamp"].astype(float).reset_index(drop=True) if "timestamp" in df.columns else None
 
-        X_s = build(closes_s, high=high_s, low=low_s, volume=volume_s,
-                    timestamps=timestamps_s, garch=garch)
-        y_s = make_labels(closes_s).reindex(X_s.index).dropna()
-        X_s = X_s.reindex(y_s.index)
-        p_s = closes_s.reindex(y_s.index)
-        X_s, y_s, p_s = X_s.iloc[:-HORIZON], y_s.iloc[:-HORIZON], p_s.iloc[:-HORIZON]
+        fg_s = None
+        if fg_history and timestamps_s is not None:
+            dates = pd.to_datetime(timestamps_s, unit="ms", utc=True).dt.strftime("%Y-%m-%d")
+            fg_s  = pd.Series([fg_history.get(d, 50) for d in dates], dtype=float)
+
+        X_s  = build(closes_s, high=high_s, low=low_s, volume=volume_s,
+                     timestamps=timestamps_s, fg_value=fg_s, garch=garch)
+        y_s  = make_labels(closes_s).reindex(X_s.index).dropna()
+        X_s  = X_s.reindex(y_s.index)
+        p_s  = closes_s.reindex(y_s.index)
+        ts_s = timestamps_s.reindex(y_s.index) if timestamps_s is not None else pd.Series(range(len(y_s)), index=y_s.index)
+        X_s, y_s, p_s, ts_s = X_s.iloc[:-HORIZON], y_s.iloc[:-HORIZON], p_s.iloc[:-HORIZON], ts_s.iloc[:-HORIZON]
 
         all_X.append(X_s.reset_index(drop=True))
         all_y.append(y_s.reset_index(drop=True))
         all_p.append(p_s.reset_index(drop=True))
+        all_ts.append(ts_s.reset_index(drop=True))
+        all_sym.append(pd.Series([sym] * len(X_s)))
         print(f"  →  {len(X_s):,} samples")
 
     if not all_X:
         print("No data found. Run: python3 collector.py --all")
         sys.exit(1)
 
-    X = pd.concat(all_X, ignore_index=True)
-    y = pd.concat(all_y, ignore_index=True)
-    p = pd.concat(all_p, ignore_index=True)
+    X   = pd.concat(all_X,   ignore_index=True)
+    y   = pd.concat(all_y,   ignore_index=True)
+    p   = pd.concat(all_p,   ignore_index=True)
+    ts  = pd.concat(all_ts,  ignore_index=True)
+    sym = pd.concat(all_sym, ignore_index=True)
     print(f"\nCombined: {len(X):,} samples  |  {X.shape[1]} features  |  {y.mean():.1%} positive class")
 
-    results = cross_validate(X, y, p, fast)
+    # Sort everything by timestamp so cross-validation splits are temporal.
+    # Concatenating per-symbol blocks meant the previous CV trained on BTC
+    # and tested on ETH at the same calendar time — leakage via cross-asset
+    # correlation. Time-sorting puts all symbols on the same clock.
+    order = ts.sort_values(kind="mergesort").index
+    X, y, p, ts, sym = (
+        X.iloc[order].reset_index(drop=True),
+        y.iloc[order].reset_index(drop=True),
+        p.iloc[order].reset_index(drop=True),
+        ts.iloc[order].reset_index(drop=True),
+        sym.iloc[order].reset_index(drop=True),
+    )
+
+    results = cross_validate(X, y, p, sym, fast)
 
     print(f"\nTraining final model on all {len(X):,} samples…")
     final = make_model(fast)

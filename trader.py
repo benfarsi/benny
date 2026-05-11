@@ -1,6 +1,8 @@
 from datetime import datetime
 from config import STARTING_BALANCE, TRADE_SIZE
 
+FEE = 0.001  # 0.1% Binance taker fee on each side
+
 
 class PaperTrader:
     def __init__(self):
@@ -8,11 +10,13 @@ class PaperTrader:
         self.btc = 0.0
         self.trades: list[dict] = []
 
-    def buy(self, price: float) -> bool:
+    def buy(self, price: float, spend_usdt: float | None = None) -> bool:
         if self.usdt <= 0:
             return False
-        spend = self.usdt * TRADE_SIZE
-        self.btc += spend / price
+        spend = min(spend_usdt, self.usdt) if spend_usdt is not None else self.usdt * TRADE_SIZE
+        if spend <= 0:
+            return False
+        self.btc += spend / price * (1 - FEE)
         self.usdt -= spend
         trade = {
             "type": "BUY",
@@ -27,7 +31,7 @@ class PaperTrader:
     def sell(self, price: float) -> bool:
         if self.btc <= 0:
             return False
-        self.usdt += self.btc * price
+        self.usdt += self.btc * price * (1 - FEE)
         self.btc = 0.0
         trade = {
             "type": "SELL",

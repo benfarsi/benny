@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import joblib
 from config import EMA_PERIOD, RSI_PERIOD, RSI_BUY_THRESHOLD, RSI_SELL_THRESHOLD, BUY_CONF, SELL_CONF
+from sentiment import get_current_fg
 
 _MODEL_PATH = os.path.join(os.path.dirname(__file__), "data", "model.pkl")
 _ml         = None
@@ -52,17 +53,15 @@ def get_signal(
             l  = pd.Series(low)        if low        is not None else None
             v  = pd.Series(volume)     if volume     is not None else None
             ts = pd.Series(timestamps) if timestamps is not None else None
-            X  = build(pd.Series(closes), high=h, low=l, volume=v, timestamps=ts, garch=True)
+            X  = build(pd.Series(closes), high=h, low=l, volume=v, timestamps=ts,
+                       fg_value=get_current_fg(), garch=True)
             if len(X) > 0:
                 row   = X.reindex(columns=_ml["features"], fill_value=0).iloc[[-1]]
                 proba = float(_ml["model"].predict_proba(row)[0, 1])
 
                 if proba > BUY_CONF:
                     return "BUY", rsi, ema, proba
-                elif proba < SELL_CONF:
-                    return "SELL", rsi, ema, proba
-                else:
-                    return "HOLD", rsi, ema, proba
+                return "HOLD", rsi, ema, proba
         except Exception:
             pass
 
