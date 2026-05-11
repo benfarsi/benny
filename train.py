@@ -31,26 +31,28 @@ TRAIN_WINDOW_DAYS = 90
 
 # ── labels ────────────────────────────────────────────────────────────────────
 
-def make_labels(closes: pd.Series) -> pd.Series:
-    """1 if price rises at least MIN_MOVE in HORIZON candles, 0 otherwise."""
-    future = closes.shift(-HORIZON)
-    return ((future - closes) / closes >= MIN_MOVE).astype(int)
+def make_labels(closes: pd.Series, min_move: float = MIN_MOVE, horizon: int = HORIZON) -> pd.Series:
+    """1 if price rises at least `min_move` in `horizon` candles, 0 otherwise."""
+    future = closes.shift(-horizon)
+    return ((future - closes) / closes >= min_move).astype(int)
 
 
 # ── metrics ───────────────────────────────────────────────────────────────────
 
-def simulate_strategy(proba: pd.Series, prices: pd.Series) -> dict:
+def simulate_strategy(proba: pd.Series, prices: pd.Series,
+                      buy_conf: float = BUY_CONF, sell_conf: float = SELL_CONF) -> dict:
     position    = False
     entry_price = None
     pnl_list    = []
     usdt        = 1000.0
     btc         = 0.0
+    equity_curve = []
 
     for i in range(len(proba) - HORIZON):
         p     = proba.iloc[i]
         price = prices.iloc[i]
 
-        if not position and p > BUY_CONF:
+        if not position and p > buy_conf:
             spent       = usdt * 0.95
             btc         = spent / price * (1 - FEE)
             usdt       -= spent
@@ -58,7 +60,7 @@ def simulate_strategy(proba: pd.Series, prices: pd.Series) -> dict:
             cost_basis  = spent
             position    = True
 
-        elif position and (p < SELL_CONF or
+        elif position and (p < sell_conf or
                            price >= entry_price * (1 + TAKE_PROFIT) or
                            price <= entry_price * (1 - STOP_LOSS)):
             proceeds = btc * price * (1 - FEE)
@@ -67,21 +69,61 @@ def simulate_strategy(proba: pd.Series, prices: pd.Series) -> dict:
             btc      = 0.0
             position = False
 
+        equity_curve.append(usdt + btc * price)
+
     final  = usdt + btc * prices.iloc[-1]
     rets   = pd.Series(pnl_list)
-    # Annualize per-trade Sharpe by √(trades/year), not √252 (which assumes daily samples).
-    # TIMEFRAME=1m → 525,600 candles per year, so years_in_fold = len(prices) / 525_600.
+    eq     = pd.Series(equity_curve) if equity_curve else pd.Series([1000.0])
+
+    # ── strategy max drawdown ──
+    peak     = eq.cummax()
+    dd_curve = (eq - peak) / peak
+    max_dd   = float(dd_curve.min()) * 100 if len(dd_curve) else 0.0
+
+    # Annualize per-trade Sharpe by √(trades/year). TIMEFRAME=1m → 525,600 candles/year.
+    # Cap absurd values: when stop-loss-only exits produce near-zero std,
+    # |Sharpe| can blow up to thousands. Real-world Sharpe rarely exceeds ±5.
     if len(rets) > 1 and rets.std() > 0:
         trades_per_year = len(rets) * 525_600 / max(len(prices), 1)
-        sharpe = rets.mean() / rets.std() * np.sqrt(trades_per_year)
+        raw_sharpe = rets.mean() / rets.std() * np.sqrt(trades_per_year)
+        sharpe     = float(np.clip(raw_sharpe, -10, 10))
+        downside   = rets[rets < 0]
+        if len(downside) > 1 and downside.std() > 0:
+            raw_sortino = rets.mean() / downside.std() * np.sqrt(trades_per_year)
+            sortino     = float(np.clip(raw_sortino, -10, 10))
+        else:
+            sortino = 0.0
     else:
-        sharpe = 0.0
+        sharpe = sortino = 0.0
+
+    total_ret_pct = (final / 1000 - 1) * 100
+    calmar = (total_ret_pct / abs(max_dd)) if max_dd < 0 else 0.0
+
+    # ── buy-and-hold baseline (same window, same starting capital) ──
+    bh_ret_pct = (prices.iloc[-1] / prices.iloc[0] - 1) * 100
+    bh_eq      = 1000 * (prices / prices.iloc[0])
+    bh_peak    = bh_eq.cummax()
+    bh_max_dd  = float(((bh_eq - bh_peak) / bh_peak).min()) * 100
+
+    bh_rets = prices.pct_change().dropna()
+    if len(bh_rets) > 1 and bh_rets.std() > 0:
+        bh_sharpe = float(bh_rets.mean() / bh_rets.std() * np.sqrt(525_600))
+        bh_sharpe = float(np.clip(bh_sharpe, -10, 10))
+    else:
+        bh_sharpe = 0.0
 
     return {
         "sharpe":    round(sharpe, 3),
-        "total_ret": round((final / 1000 - 1) * 100, 2),
+        "sortino":   round(sortino, 3),
+        "calmar":    round(calmar, 3),
+        "total_ret": round(total_ret_pct, 2),
+        "max_dd":    round(max_dd, 2),
         "n_trades":  len(pnl_list),
         "win_rate":  round((rets > 0).mean() * 100, 1) if len(rets) > 0 else 0.0,
+        "bh_ret":    round(bh_ret_pct, 2),
+        "bh_max_dd": round(bh_max_dd, 2),
+        "bh_sharpe": round(bh_sharpe, 3),
+        "alpha":     round(total_ret_pct - bh_ret_pct, 2),
     }
 
 
@@ -103,14 +145,24 @@ def make_model(fast: bool) -> xgb.XGBClassifier:
 
 
 def _aggregate_sim(sym_sims: list[dict]) -> dict:
-    """Average per-symbol Sharpe/win-rate, sum trades, and return mean total_ret."""
+    """Average per-symbol metrics (mean of capped Sharpes), sum trades, equal-weight returns."""
     if not sym_sims:
-        return {"sharpe": 0.0, "total_ret": 0.0, "n_trades": 0, "win_rate": 0.0}
+        return {"sharpe": 0.0, "sortino": 0.0, "calmar": 0.0, "total_ret": 0.0,
+                "max_dd": 0.0, "n_trades": 0, "win_rate": 0.0,
+                "bh_ret": 0.0, "bh_max_dd": 0.0, "bh_sharpe": 0.0, "alpha": 0.0}
+    mean = lambda k: float(np.mean([s[k] for s in sym_sims]))
     return {
-        "sharpe":    round(float(np.mean([s["sharpe"]    for s in sym_sims])), 3),
-        "total_ret": round(float(np.mean([s["total_ret"] for s in sym_sims])), 2),
-        "n_trades":  int(sum   ([s["n_trades"]  for s in sym_sims])),
-        "win_rate":  round(float(np.mean([s["win_rate"]  for s in sym_sims])), 1),
+        "sharpe":    round(mean("sharpe"),    3),
+        "sortino":   round(mean("sortino"),   3),
+        "calmar":    round(mean("calmar"),    3),
+        "total_ret": round(mean("total_ret"), 2),
+        "max_dd":    round(mean("max_dd"),    2),
+        "n_trades":  int(sum(s["n_trades"] for s in sym_sims)),
+        "win_rate":  round(mean("win_rate"),  1),
+        "bh_ret":    round(mean("bh_ret"),    2),
+        "bh_max_dd": round(mean("bh_max_dd"), 2),
+        "bh_sharpe": round(mean("bh_sharpe"), 3),
+        "alpha":     round(mean("alpha"),     2),
     }
 
 
@@ -129,8 +181,9 @@ def cross_validate(X: pd.DataFrame, y: pd.Series, prices: pd.Series,
     results   = []
 
     print(f"\nWalk-forward validation  ({N_FOLDS} folds, horizon={HORIZON} candles)")
-    print(f"  {'Fold':>4}  {'Train':>8}  {'Test':>8}  {'AUC':>6}  {'Sharpe':>8}  {'Return':>8}  {'Trades':>7}  {'Win%':>6}")
-    print("  " + "─" * 70)
+    hdr = f"  {'Fold':>4}  {'AUC':>5}  {'Sharpe':>7}  {'Sortino':>7}  {'Calmar':>6}  {'Return':>8}  {'MaxDD':>7}  {'Alpha':>8}  {'BH Ret':>8}  {'BH DD':>7}  {'BH Shp':>7}  {'Trades':>6}  {'Win%':>5}"
+    print(hdr)
+    print("  " + "─" * (len(hdr) - 2))
 
     for fold in range(N_FOLDS):
         tr_end = fold_size * (fold + 1)
@@ -159,16 +212,37 @@ def cross_validate(X: pd.DataFrame, y: pd.Series, prices: pd.Series,
 
         results.append({"auc": auc, **sim})
         print(
-            f"  {fold+1:>4}  {len(X_tr):>8,}  {len(X_te):>8,}  "
-            f"{auc:>6.3f}  {sim['sharpe']:>8.3f}  "
-            f"{sim['total_ret']:>+7.2f}%  {sim['n_trades']:>7}  {sim['win_rate']:>5.1f}%"
+            f"  {fold+1:>4}  {auc:>5.3f}  {sim['sharpe']:>+7.2f}  {sim['sortino']:>+7.2f}  "
+            f"{sim['calmar']:>+6.2f}  {sim['total_ret']:>+7.2f}%  {sim['max_dd']:>+6.2f}%  "
+            f"{sim['alpha']:>+7.2f}%  {sim['bh_ret']:>+7.2f}%  {sim['bh_max_dd']:>+6.2f}%  "
+            f"{sim['bh_sharpe']:>+7.2f}  {sim['n_trades']:>6}  {sim['win_rate']:>4.1f}%"
         )
 
-    print("  " + "─" * 70)
-    avg_auc    = np.mean([r["auc"]       for r in results])
-    avg_sharpe = np.mean([r["sharpe"]    for r in results])
-    avg_ret    = np.mean([r["total_ret"] for r in results])
-    print(f"  {'avg':>4}  {'':>8}  {'':>8}  {avg_auc:>6.3f}  {avg_sharpe:>8.3f}  {avg_ret:>+7.2f}%")
+    print("  " + "─" * (len(hdr) - 2))
+    avg_auc     = np.mean([r["auc"]       for r in results])
+    avg_sharpe  = np.mean([r["sharpe"]    for r in results])
+    avg_sortino = np.mean([r["sortino"]   for r in results])
+    avg_calmar  = np.mean([r["calmar"]    for r in results])
+    avg_ret     = np.mean([r["total_ret"] for r in results])
+    avg_dd      = np.mean([r["max_dd"]    for r in results])
+    avg_alpha   = np.mean([r["alpha"]     for r in results])
+    avg_bh_ret  = np.mean([r["bh_ret"]    for r in results])
+    avg_bh_dd   = np.mean([r["bh_max_dd"] for r in results])
+    avg_bh_shp  = np.mean([r["bh_sharpe"] for r in results])
+    print(
+        f"  {'avg':>4}  {avg_auc:>5.3f}  {avg_sharpe:>+7.2f}  {avg_sortino:>+7.2f}  "
+        f"{avg_calmar:>+6.2f}  {avg_ret:>+7.2f}%  {avg_dd:>+6.2f}%  "
+        f"{avg_alpha:>+7.2f}%  {avg_bh_ret:>+7.2f}%  {avg_bh_dd:>+6.2f}%  {avg_bh_shp:>+7.2f}"
+    )
+
+    # Verdict line — does the strategy actually beat buy-and-hold?
+    print()
+    if avg_alpha > 0 and avg_sharpe > avg_bh_shp:
+        print(f"  ✓  Strategy beats buy-and-hold by {avg_alpha:+.2f}% return and {avg_sharpe - avg_bh_shp:+.2f} Sharpe.")
+    elif avg_alpha > 0:
+        print(f"  ~  Strategy edges buy-and-hold on return ({avg_alpha:+.2f}%) but loses on risk-adjusted (Sharpe {avg_sharpe:+.2f} vs {avg_bh_shp:+.2f}).")
+    else:
+        print(f"  ✗  Strategy LOSES to buy-and-hold: alpha {avg_alpha:+.2f}%, Sharpe {avg_sharpe:+.2f} vs BH {avg_bh_shp:+.2f}. Don't deploy.")
 
     return results
 
@@ -273,16 +347,28 @@ def train():
         bar = "█" * int(score * 300)
         print(f"  {feat:<26} {score:.4f}  {bar}")
 
-    avg_auc    = float(np.mean([r["auc"]       for r in results]))
-    avg_sharpe = float(np.mean([r["sharpe"]    for r in results]))
-    avg_ret    = float(np.mean([r["total_ret"] for r in results]))
+    avg_auc     = float(np.mean([r["auc"]       for r in results]))
+    avg_sharpe  = float(np.mean([r["sharpe"]    for r in results]))
+    avg_sortino = float(np.mean([r["sortino"]   for r in results]))
+    avg_calmar  = float(np.mean([r["calmar"]    for r in results]))
+    avg_ret     = float(np.mean([r["total_ret"] for r in results]))
+    avg_dd      = float(np.mean([r["max_dd"]    for r in results]))
+    avg_alpha   = float(np.mean([r["alpha"]     for r in results]))
+    avg_bh_ret  = float(np.mean([r["bh_ret"]    for r in results]))
+    avg_bh_shp  = float(np.mean([r["bh_sharpe"] for r in results]))
     meta = {
         "trained_at":         datetime.utcnow().isoformat(timespec="seconds"),
         "n_samples":          int(len(X)),
         "n_features":         int(X.shape[1]),
         "avg_auc":            avg_auc,
         "avg_sharpe":         avg_sharpe,
+        "avg_sortino":        avg_sortino,
+        "avg_calmar":         avg_calmar,
         "avg_ret":            avg_ret,
+        "avg_max_dd":         avg_dd,
+        "avg_alpha":          avg_alpha,
+        "avg_bh_ret":         avg_bh_ret,
+        "avg_bh_sharpe":      avg_bh_shp,
         "folds":              results,
         "feature_importance": [{"name": n, "score": float(s)} for n, s in imp.head(20).items()],
     }
